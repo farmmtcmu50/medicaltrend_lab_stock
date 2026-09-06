@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "medical-trend-lab-stock",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    {
+      "pattern": "stock.medicaltrend.stream",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "medical-trend-lab-stock",
+      "database_id": "ce9f4e96-cd21-4190-8639-5026c3ea80ba",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "APP_NAME": "Medical Trend Lab Stock",
+    "SESSION_COOKIE": "mt_stock_session"
+  }
+}

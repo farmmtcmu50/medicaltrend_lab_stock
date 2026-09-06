@@ -1,0 +1,22 @@
+{
+  "name": "medical-trend-lab-stock-cloudflare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create medical-trend-lab-stock",
+    "db:migrate:local": "wrangler d1 migrations apply medical-trend-lab-stock --local",
+    "db:migrate:remote": "wrangler d1 migrations apply medical-trend-lab-stock --remote",
+    "db:seed:local": "wrangler d1 execute medical-trend-lab-stock --local --file=./seed.sql",
+    "db:seed:remote": "wrangler d1 execute medical-trend-lab-stock --remote --file=./seed.sql",
+    "check": "wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
