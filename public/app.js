@@ -8,9 +8,17 @@ const state = {
   reportRows: [],
   reportMeta: null,
   prRows: [],
+  prRequests: [],
+  editingPrId: "",
+  branding: {
+    lab_name: "Medical Trend",
+    logo_data_url: "/logo-medical-trend.png",
+  },
   users: [],
   audits: [],
   lastLabels: [],
+  consumeScanTimer: null,
+  consumeScanBusy: false,
 };
 
 const dashboardColumns = [
@@ -19,6 +27,7 @@ const dashboardColumns = [
   ["main_unit_price", "ราคาหลัก"], ["stock_value", "มูลค่า Stock"], ["reorder_point_sub", "Safety Stock"],
   ["lead_time_days", "Lead"], ["supplier", "Supplier"],
 ];
+const priceColumnKeys = new Set(["unit_price", "main_unit_price", "stock_value", "total", "total_value"]);
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -40,12 +49,19 @@ async function boot() {
 function bindUi() {
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const data = formData(e.target);
-    const res = await api("/api/login", { method: "POST", body: data });
-    state.user = res.user;
-    showApp();
-    await refreshAll();
+    showLoginError("");
+    try {
+      const data = formData(e.target);
+      const res = await api("/api/login", { method: "POST", body: data });
+      state.user = res.user;
+      showApp();
+      await refreshAll();
+    } catch (error) {
+      showLoginError(error.message || "ใส่ username หรือ password ผิด");
+    }
   });
+  $("#loginForm").username.addEventListener("input", () => showLoginError(""));
+  $("#loginForm").password.addEventListener("input", () => showLoginError(""));
   $("#logoutBtn").addEventListener("click", async () => {
     await api("/api/logout", { method: "POST" });
     location.reload();
@@ -54,9 +70,13 @@ function bindUi() {
 
   $("#dashboardSearchBtn").addEventListener("click", refreshDashboard);
   $("#dashboardSearch").addEventListener("keydown", enter(refreshDashboard));
+  $("#dashboardMachineFilter").addEventListener("change", refreshDashboard);
   $("#refreshDashboardBtn").addEventListener("click", refreshDashboard);
   $("#itemSearchBtn").addEventListener("click", refreshItems);
   $("#itemSearch").addEventListener("keydown", enter(refreshItems));
+  $("#itemMachineFilter").addEventListener("change", refreshItems);
+  $("#receiveItemSearchBtn").addEventListener("click", renderReceiveItems);
+  $("#receiveItemSearch").addEventListener("keydown", enter(renderReceiveItems));
   $("#stockSearchBtn").addEventListener("click", refreshStock);
   $("#stockSearch").addEventListener("keydown", enter(refreshStock));
   $("#reprintSearchBtn").addEventListener("click", refreshReprintStock);
@@ -73,12 +93,16 @@ function bindUi() {
   $("#prSource").addEventListener("change", renderPrSuggestions);
   $("#refreshPrSuggestionsBtn").addEventListener("click", refreshPrSuggestions);
   $("#addSelectedPrBtn").addEventListener("click", addSelectedPrSuggestions);
+  $("#addAllVisiblePrBtn").addEventListener("click", addAllVisiblePrSuggestions);
   $("#openManualPrDialogBtn").addEventListener("click", openManualPrDialog);
   $("#closeManualPrDialogBtn").addEventListener("click", () => $("#manualPrDialog").close());
   $("#manualPrSearchBtn").addEventListener("click", renderManualPrItems);
   $("#manualPrSearch").addEventListener("keydown", enter(renderManualPrItems));
   $("#printPrBtn").addEventListener("click", printPurchaseRequisition);
+  $("#submitPrBtn").addEventListener("click", submitPurchaseRequisition);
+  $("#refreshPrRequestsBtn").addEventListener("click", refreshPurchaseRequisitions);
   $("#clearPrBtn").addEventListener("click", clearPurchaseRequisition);
+  $("#cancelEditPrBtn").addEventListener("click", cancelPurchaseRequisitionEdit);
 
   const itemForm = $("#itemForm");
   itemForm.addEventListener("submit", saveItem);
@@ -89,17 +113,20 @@ function bindUi() {
   $("#cancelEditItemBtn").addEventListener("click", closeItemDialog);
 
   $("#receiveForm").addEventListener("submit", receiveStock);
-  $("#receiveForm").item_id.addEventListener("change", refreshLotOptions);
   $("#receiveForm").lot.addEventListener("change", applySelectedLotExpiry);
+  $("#closeReceiveDialogBtn").addEventListener("click", () => $("#receiveDialog").close());
   $("#printLastLabelsBtn").addEventListener("click", () => printLabels(state.lastLabels));
   $("#consumeForm").addEventListener("submit", consumeFromForm);
+  $("#consumeForm").barcode.addEventListener("input", scheduleConsumeScan);
 
   $("#expiringForm").addEventListener("submit", saveExpiring);
+  $("#brandingForm").addEventListener("submit", saveBranding);
+  $("#brandingForm").logo.addEventListener("change", previewBrandingLogo);
+  $("#changePasswordForm").addEventListener("submit", changeOwnPassword);
   $("#restoreForm").addEventListener("submit", restoreBackup);
   $("#clearForm").addEventListener("submit", clearDatabase);
   $("#optimizeBtn").addEventListener("click", optimizeDb);
   $("#userForm").addEventListener("submit", saveUser);
-  $("#newUserBtn").addEventListener("click", resetUserForm);
   setDefaultReportDates();
   setDefaultPrMeta();
 }
@@ -110,24 +137,42 @@ function showApp() {
   $("#userLabel").textContent = `${state.user.username} (${state.user.role})`;
   if ($("#prMetaForm") && !$("#prMetaForm").requester.value) $("#prMetaForm").requester.value = state.user.username;
   $$(".admin-only").forEach((el) => el.classList.toggle("hidden", state.user.role !== "admin"));
+  $$(".price-only").forEach((el) => el.classList.toggle("hidden", !canViewPrices()));
 }
 
 function switchTab(tab) {
-  $$(".nav").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $$(".nav").forEach((b) => {
+    const isPrParent = b.classList.contains("nav-parent") && tab === "pr-list";
+    b.classList.toggle("active", b.dataset.tab === tab || isPrParent);
+  });
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
   if (tab === "consume") setTimeout(() => $("#consumeForm").barcode.focus(), 0);
 }
 
+function showLoginError(message) {
+  const el = $("#loginError");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("hidden", !message);
+}
+
 async function refreshAll() {
   await Promise.all([refreshSettings(), refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock()]);
-  await refreshReport();
+  await Promise.all([refreshReport(), refreshPurchaseRequisitions()]);
   if (state.user.role === "admin") await Promise.all([refreshUsers(), refreshAudit()]);
   if (location.hash) switchTab(location.hash.slice(1));
 }
 
 async function refreshSettings() {
   const res = await api("/api/settings");
+  state.branding = {
+    lab_name: res.branding?.lab_name || "Medical Trend",
+    logo_data_url: res.branding?.logo_data_url || "/logo-medical-trend.png",
+  };
+  applyBranding();
+  $("#brandingForm").lab_name.value = state.branding.lab_name;
+  $("#brandingPreview").src = state.branding.logo_data_url;
   $("#expiringForm").value.value = res.expiring_days;
   $("#systemInfo").innerHTML = Object.entries({
     Platform: "Cloudflare Workers + D1",
@@ -140,51 +185,164 @@ async function refreshSettings() {
   }).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 }
 
+function applyBranding() {
+  document.title = `${state.branding.lab_name} Lab Stock`;
+  $$(".lab-name").forEach((el) => { el.textContent = state.branding.lab_name; });
+  $$(".brand-logo").forEach((img) => { img.src = state.branding.logo_data_url; });
+}
+
 async function refreshDashboard() {
   const q = encodeURIComponent($("#dashboardSearch").value.trim());
-  const res = await api(`/api/dashboard?q=${q}`);
+  const selectedMachine = $("#dashboardMachineFilter").value.trim();
+  const machine = encodeURIComponent(selectedMachine);
+  const res = await api(`/api/dashboard?q=${q}&machine=${machine}`);
   state.dashboard = res.rows;
-  $("#sumItems").textContent = res.rows.length;
+  renderMachineFilter($("#dashboardMachineFilter"), res.machines || [], selectedMachine);
   $("#sumExpiringItems").textContent = res.rows.filter((row) => row.status === "EXPIRING").length;
   $("#sumExpiredItems").textContent = res.rows.filter((row) => row.status === "EXPIRED").length;
-  $("#sumValue").textContent = money(res.total_value);
+  if (canViewPrices()) {
+    $("#sumValue").textContent = money(res.total_value);
+    $("#sumAgingValue").textContent = money(res.rows
+      .filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status))
+      .reduce((sum, row) => sum + Number(row.stock_value || 0), 0));
+  }
   renderDashboardColumns();
-  renderTable($("#dashboardTable"), dashboardColumns, res.rows, {
+  renderTable($("#dashboardTable"), dashboardVisibleColumns(), res.rows, {
     status: (v) => `<span class="badge ${v}">${v}</span>`,
     unit_price: money, main_unit_price: money, stock_value: money,
   }, (row) => row.status);
+  applyDashboardColumnVisibility();
   renderPrSuggestions();
 }
 
 function renderDashboardColumns() {
   const host = $("#dashboardColumns");
-  if (host.children.length) return;
-  host.innerHTML = dashboardColumns.map(([key, label]) => `<label><input type="checkbox" data-col="${key}" checked> ${label}</label>`).join("");
+  const visible = loadDashboardColumnPreference();
+  if (host.children.length) {
+    $$("input", host).forEach((box) => { box.checked = visible.has(box.dataset.col); });
+    return;
+  }
+  host.innerHTML = dashboardVisibleColumns().map(([key, label]) =>
+    `<label><input type="checkbox" data-col="${key}" ${visible.has(key) ? "checked" : ""}> ${label}</label>`
+  ).join("");
   $$("input", host).forEach((box) => box.addEventListener("change", () => {
-    const visible = new Set($$("input:checked", host).map((b) => b.dataset.col));
-    if (!visible.size) box.checked = true;
-    $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", !visible.has(cell.dataset.key)));
+    let nextVisible = new Set($$("input:checked", host).map((b) => b.dataset.col));
+    if (!nextVisible.size) {
+      box.checked = true;
+      nextVisible = new Set([box.dataset.col]);
+    }
+    saveDashboardColumnPreference(nextVisible);
+    applyDashboardColumnVisibility();
   }));
+}
+
+function dashboardColumnStorageKey() {
+  return `mt_dashboard_columns_${state.user?.username || "guest"}`;
+}
+
+function loadDashboardColumnPreference() {
+  const all = dashboardVisibleColumns().map(([key]) => key);
+  try {
+    const saved = JSON.parse(localStorage.getItem(dashboardColumnStorageKey()) || "null");
+    const valid = Array.isArray(saved) ? saved.filter((key) => all.includes(key)) : [];
+    return new Set(valid.length ? valid : all);
+  } catch {
+    return new Set(all);
+  }
+}
+
+function saveDashboardColumnPreference(visible) {
+  localStorage.setItem(dashboardColumnStorageKey(), JSON.stringify([...visible]));
+}
+
+function applyDashboardColumnVisibility() {
+  const visible = new Set($$("input:checked", $("#dashboardColumns")).map((box) => box.dataset.col));
+  $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", !visible.has(cell.dataset.key)));
 }
 
 async function refreshItems() {
   const q = encodeURIComponent($("#itemSearch").value.trim());
-  const res = await api(`/api/items?q=${q}`);
+  const selectedMachine = $("#itemMachineFilter").value.trim();
+  const machine = encodeURIComponent(selectedMachine);
+  const res = await api(`/api/items?q=${q}&machine=${machine}`);
   state.items = res.rows;
-  $("#receiveForm").item_id.innerHTML = state.items.map((i) => `<option value="${i.item_id}">${esc(i.reagent_name)} | ${esc(i.machine)}</option>`).join("");
+  renderMachineFilter($("#itemMachineFilter"), res.machines || [], selectedMachine);
+  renderReceiveItems();
   renderManualPrItems();
-  await refreshLotOptions();
-  renderTable($("#itemsTable"), [
-    ["reagent_name", "ชื่อ"], ["machine", "เครื่อง"], ["main_unit", "หน่วยหลัก"], ["sub_unit", "หน่วยย่อย"],
-    ["sub_per_main", "ย่อย/หลัก"], ["supplier", "Supplier"], ["unit_price", "ราคาย่อย"], ["main_unit_price", "ราคาหลัก"],
-    ["lead_time_days", "Lead"], ["reorder_point_sub", "Safety Stock"], ["actions", "จัดการ"],
-  ], state.items.map((item) => ({ ...item, actions: item.item_id })), {
+  renderTable($("#itemsTable"), itemVisibleColumns(), state.items.map((item) => ({
+    ...item,
+    active_label: Number(item.is_active ?? 1) ? "Active" : "Inactive",
+    actions: item.item_id,
+  })), {
+    active_label: (v) => `<span class="badge ${esc(v.toUpperCase())}">${esc(v)}</span>`,
     unit_price: money,
     main_unit_price: money,
-    actions: (_, item) => `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`,
+    actions: (_, item) => {
+      const active = Number(item.is_active ?? 1) === 1;
+      return `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button data-toggle-item="${item.item_id}" class="${active ? "warning" : "primary"}">${active ? "Inactive" : "Active"}</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`;
+    },
   });
   $$("[data-edit-item]").forEach((btn) => btn.addEventListener("click", () => editItem(btn.dataset.editItem)));
+  $$("[data-toggle-item]").forEach((btn) => btn.addEventListener("click", () => toggleItemActive(btn.dataset.toggleItem)));
   $$("[data-delete-item]").forEach((btn) => btn.addEventListener("click", () => deleteItem(btn.dataset.deleteItem)));
+}
+
+function dashboardVisibleColumns() {
+  return dashboardColumns.filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+}
+
+function itemVisibleColumns() {
+  return [
+    ["active_label", "สถานะ"], ["reagent_name", "ชื่อ"], ["machine", "เครื่อง"], ["main_unit", "หน่วยหลัก"], ["sub_unit", "หน่วยย่อย"],
+    ["sub_per_main", "ย่อย/หลัก"], ["supplier", "Supplier"], ["lead_time_days", "Lead"],
+    ["reorder_point_sub", "Safety Stock"], ["actions", "จัดการ"],
+  ];
+}
+
+function canViewPrices() {
+  return state.user?.role === "admin";
+}
+
+function renderMachineFilter(select, machines, selected) {
+  const unique = [...new Set((machines || []).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "th"));
+  const options = [`<option value="">ทุกเครื่อง</option>`].concat(
+    unique.map((machine) => `<option value="${esc(machine)}" ${machine === selected ? "selected" : ""}>${esc(machine)}</option>`)
+  );
+  if (selected && !unique.includes(selected)) {
+    options.push(`<option value="${esc(selected)}" selected>${esc(selected)}</option>`);
+  }
+  select.innerHTML = options.join("");
+}
+
+function renderReceiveItems() {
+  const q = ($("#receiveItemSearch")?.value || "").trim().toLowerCase();
+  const rows = state.items.filter((item) => Number(item.is_active ?? 1) === 1).filter((item) => !q
+    || String(item.reagent_name || "").toLowerCase().includes(q)
+    || String(item.machine || "").toLowerCase().includes(q)
+    || String(item.supplier || "").toLowerCase().includes(q));
+  renderTable($("#receiveItemsTable"), [
+    ["reagent_name", "ชื่อ"], ["machine", "เครื่อง"], ["main_unit", "หน่วยหลัก"], ["sub_unit", "หน่วยย่อย"],
+    ["sub_per_main", "ย่อย/หลัก"], ["supplier", "Supplier"], ["actions", "รับเข้า"],
+  ], rows.map((item) => ({ ...item, actions: item.item_id })), {
+    actions: (_, item) => `<button data-receive-item="${esc(item.item_id)}" type="button">รับเข้า</button>`,
+  });
+  $$("[data-receive-item]").forEach((btn) => btn.addEventListener("click", () => openReceiveDialog(btn.dataset.receiveItem)));
+}
+
+async function openReceiveDialog(itemId) {
+  const item = state.items.find((row) => row.item_id === itemId);
+  if (!item) return toast("ไม่พบรายการน้ำยา", true);
+  const form = $("#receiveForm");
+  form.reset();
+  form.item_id.value = item.item_id;
+  form.quantity.value = 1;
+  form.unit_mode.value = "sub";
+  form.sticker_mode.value = "sub";
+  $("#receiveDialogTitle").textContent = `รับเข้า: ${item.reagent_name}`;
+  $("#receiveDialogMeta").textContent = `${item.machine || "-"} | ${item.main_unit || "-"} / ${item.sub_unit || "-"} | Supplier: ${item.supplier || "-"}`;
+  await refreshLotOptions();
+  $("#receiveDialog").showModal();
+  form.quantity.focus();
 }
 
 async function refreshStock() {
@@ -227,13 +385,18 @@ async function refreshReport(e) {
   const res = await api(`/api/reports?${params.toString()}`);
   state.reportRows = res.rows;
   state.reportMeta = res;
-  renderTable($("#reportTable"), [
-    ["timestamp", "เวลา"], ["type_label", "ประเภท"], ["reagent_name", "ชื่อ"], ["lot", "Lot"],
-    ["barcode", "QR code"], ["quantity_sub", "จำนวนย่อย"], ["operator_username", "ผู้ทำรายการ"], ["operator_note", "Note"],
-  ], res.rows.map((row) => ({
+  renderTable($("#reportTable"), reportColumns(res.report_type), res.rows.map((row) => ({
     ...row,
     type_label: row.type === "RECEIVE" ? "รับเข้า" : "ตัด Stock",
   })));
+}
+
+function reportColumns(reportType) {
+  const columns = [
+    ["timestamp", "เวลา"], ["type_label", "ประเภท"], ["reagent_name", "ชื่อ"], ["lot", "Lot"],
+    ["barcode", "QR code"], ["quantity_sub", "จำนวนย่อย"], ["operator_username", "ผู้ทำรายการ"], ["operator_note", "Note"],
+  ];
+  return reportType === "receive" ? columns.filter(([key]) => key !== "barcode") : columns;
 }
 
 async function setReportType(type) {
@@ -278,18 +441,22 @@ function reportRange(anchor, period) {
 function printReport() {
   if (!state.reportRows.length) return toast("ไม่มีข้อมูลรายงานสำหรับพิมพ์", true);
   const meta = state.reportMeta || {};
+  const labName = state.branding.lab_name;
+  const logoSrc = state.branding.logo_data_url;
   const title = meta.report_type === "consume" ? "รายงานการตัด Stock" : "รายงานการรับน้ำยา";
+  const showBarcode = meta.report_type !== "receive";
   const rows = state.reportRows.map((row) => `
     <tr>
-      <td>${esc(row.timestamp)}</td>
+      <td>${esc(formatDateTime(row.timestamp))}</td>
       <td>${row.type === "RECEIVE" ? "รับเข้า" : "ตัด Stock"}</td>
       <td>${esc(row.reagent_name)}</td>
       <td>${esc(row.lot)}</td>
-      <td>${esc(row.barcode)}</td>
+      ${showBarcode ? `<td>${esc(row.barcode)}</td>` : ""}
       <td>${esc(row.quantity_sub)}</td>
       <td>${esc(row.operator_username)}</td>
       <td>${esc(row.operator_note)}</td>
     </tr>`).join("");
+  const barcodeHeader = showBarcode ? "<th>QR code</th>" : "";
   const win = window.open("", "_blank");
   win.document.open();
   win.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${title}</title>
@@ -302,9 +469,9 @@ function printReport() {
       @media print{button{display:none} body{margin:12mm}}
     </style></head><body>
     <button onclick="window.print()">พิมพ์รายงาน</button>
-    <header><img src="/logo-medical-trend.png" alt=""><div><h1>${title}</h1><p>ช่วงวันที่ ${esc(meta.from || "")} ถึง ${esc(meta.to || "")}</p></div></header>
+    <header><img src="${esc(logoSrc)}" alt=""><div><h1>${title}</h1><p>${esc(labName)}</p><p>ช่วงวันที่ ${esc(meta.from || "")} ถึง ${esc(meta.to || "")}</p></div></header>
     <div class="summary"><span>จำนวนรายการ: ${esc(meta.summary?.rows || 0)}</span><span>จำนวนหน่วยย่อยรวม: ${esc(meta.summary?.quantity_sub || 0)}</span><span>จำนวนชนิดน้ำยา: ${esc(meta.summary?.items || 0)}</span></div>
-    <table><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>Lot</th><th>QR code</th><th>จำนวนย่อย</th><th>ผู้ทำรายการ</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>Lot</th>${barcodeHeader}<th>จำนวนย่อย</th><th>ผู้ทำรายการ</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table>
     </body></html>`);
   win.document.close();
 }
@@ -320,7 +487,7 @@ function renderPrSuggestions() {
   if (!table) return;
   const rows = suggestedPrRows();
   renderTable(table, [
-    ["select", ""], ["status", "สถานะ"], ["name", "ชื่อ"], ["lot", "Lot"], ["expiry", "Expire"],
+    ["select", ""], ["status", "สถานะ"], ["name", "ชื่อ"], ["expiry", "Expire"],
     ["qty_main_display", "Stock ปัจจุบัน"], ["reorder_point_sub", "Safety Stock"], ["supplier", "Supplier"],
     ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["reason", "เหตุผล"], ["actions", "เพิ่ม"],
   ], rows.map((row) => ({
@@ -356,6 +523,14 @@ function addSelectedPrSuggestions() {
   ids.forEach(addPrSuggestion);
   renderPurchaseRequisition();
   toast("เพิ่มรายการที่เลือกเข้าใบ PR แล้ว");
+}
+
+function addAllVisiblePrSuggestions() {
+  const rows = suggestedPrRows();
+  if (!rows.length) return toast("ไม่มีรายการแนะนำที่แสดงอยู่", true);
+  rows.forEach((row) => addPrSuggestion(row.item_id));
+  renderPurchaseRequisition();
+  toast(`เพิ่มรายการทั้งหมดที่แสดงเข้าใบ PR แล้ว (${rows.length} รายการ)`);
 }
 
 function addPrSuggestion(itemId) {
@@ -395,14 +570,15 @@ function openManualPrDialog() {
 
 function renderManualPrItems() {
   const q = ($("#manualPrSearch")?.value || "").trim().toLowerCase();
-  const rows = state.items.filter((item) => !q
+  const rows = state.items.filter((item) => Number(item.is_active ?? 1) === 1).filter((item) => !q
     || String(item.reagent_name || "").toLowerCase().includes(q)
     || String(item.machine || "").toLowerCase().includes(q)
     || String(item.supplier || "").toLowerCase().includes(q));
-  renderTable($("#manualPrTable"), [
+  const columns = [
     ["reagent_name", "ชื่อสินค้า"], ["machine", "เครื่อง"], ["supplier", "Supplier"], ["order_qty", "จำนวน"],
     ["unit", "หน่วย"], ["unit_price", "ราคา"], ["reason", "เหตุผล"], ["actions", "เลือก"],
-  ], rows.map((item) => ({
+  ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+  renderTable($("#manualPrTable"), columns, rows.map((item) => ({
     ...item,
     order_qty: 1,
     unit: item.main_unit || item.sub_unit || "",
@@ -455,11 +631,12 @@ function manualPrRowData(itemId, item) {
 }
 
 function renderPurchaseRequisition() {
-  renderTable($("#prTable"), [
+  const columns = [
     ["name", "ชื่อสินค้า"], ["supplier", "Supplier"], ["current_stock", "Stock ปัจจุบัน"], ["lot", "Lot"],
     ["expiry", "Expire"], ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["unit_price", "ราคาประมาณ"],
     ["total", "รวม"], ["reason", "เหตุผล"], ["actions", "ลบ"],
-  ], state.prRows.map((row) => ({
+  ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+  renderTable($("#prTable"), columns, state.prRows.map((row) => ({
     ...row,
     total: Number(row.order_qty || 0) * Number(row.unit_price || 0),
     actions: row.id,
@@ -494,12 +671,143 @@ async function clearPurchaseRequisition() {
   renderPurchaseRequisition();
 }
 
+async function refreshPurchaseRequisitions() {
+  const res = await api("/api/purchase-requisitions");
+  state.prRequests = res.rows || [];
+  const columns = [
+    ["pr_no", "เลขที่ PR"], ["status", "สถานะ"], ["request_date", "วันที่ขอซื้อ"], ["requester", "ผู้ขอซื้อ"],
+    ["department", "แผนก"], ["requested_by", "ส่งโดย"], ["approved_by", "อนุมัติโดย"], ["approved_at", "อนุมัติเมื่อ"],
+    ["total_value", "มูลค่า"], ["actions", "จัดการ"],
+  ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+  renderTable($("#prRequestsTable"), columns, state.prRequests.map((row) => ({ ...row, actions: row.pr_id })), {
+    status: (v) => `<span class="badge ${esc(v)}">${esc(v)}</span>`,
+    total_value: money,
+    actions: (_, row) => prRequestActions(row),
+  }, (row) => row.status);
+  $$("[data-approve-pr]").forEach((btn) => btn.addEventListener("click", () => approvePurchaseRequisition(btn.dataset.approvePr)));
+  $$("[data-unapprove-pr]").forEach((btn) => btn.addEventListener("click", () => unapprovePurchaseRequisition(btn.dataset.unapprovePr)));
+  $$("[data-print-pr]").forEach((btn) => btn.addEventListener("click", () => printSavedPurchaseRequisition(btn.dataset.printPr)));
+  $$("[data-edit-pr-request]").forEach((btn) => btn.addEventListener("click", () => editPurchaseRequisition(btn.dataset.editPrRequest)));
+  $$("[data-delete-pr-request]").forEach((btn) => btn.addEventListener("click", () => deletePurchaseRequisition(btn.dataset.deletePrRequest)));
+}
+
+function prRequestActions(row) {
+  const isAdmin = canViewPrices();
+  const canEdit = isAdmin || (row.status === "PENDING" && row.requested_by === state.user?.username);
+  const canDelete = row.status === "PENDING" && (isAdmin || row.requested_by === state.user?.username);
+  const approve = row.status === "PENDING" ? `<button data-approve-pr="${esc(row.pr_id)}" type="button">อนุมัติ</button>` : "";
+  const unapprove = row.status === "APPROVED" ? `<button class="warning" data-unapprove-pr="${esc(row.pr_id)}" type="button">ถอยอนุมัติ</button>` : "";
+  const print = isAdmin ? `<button data-print-pr="${esc(row.pr_id)}" type="button">พิมพ์</button>` : "";
+  const edit = canEdit ? `<button data-edit-pr-request="${esc(row.pr_id)}" type="button">แก้ไข</button>` : "";
+  const remove = canDelete ? `<button class="danger" data-delete-pr-request="${esc(row.pr_id)}" type="button">ลบ</button>` : "";
+  return `<div class="row-actions">${isAdmin ? approve + unapprove : ""}${print}${edit}${remove}</div>`;
+}
+
+async function submitPurchaseRequisition() {
+  if (!state.prRows.length) return toast("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ", true);
+  const meta = formData($("#prMetaForm"));
+  const editing = Boolean(state.editingPrId);
+  const path = editing ? `/api/purchase-requisitions/${encodeURIComponent(state.editingPrId)}` : "/api/purchase-requisitions";
+  const res = await api(path, { method: editing ? "PUT" : "POST", body: { ...meta, items: state.prRows } });
+  resetPurchaseRequisitionEditor();
+  await Promise.all([refreshPurchaseRequisitions(), refreshAuditMaybe()]);
+  toast(editing ? `บันทึกแก้ไขใบ PR ${res.pr_no} แล้ว` : `ส่งใบ PR ${res.pr_no} เพื่อรออนุมัติแล้ว`);
+}
+
+async function approvePurchaseRequisition(prId) {
+  const row = state.prRequests.find((item) => item.pr_id === prId);
+  if (!row) return;
+  if (!(await confirmBox("อนุมัติใบ PR", `อนุมัติใบ PR ${row.pr_no} ใช่ไหม?`))) return;
+  await api(`/api/purchase-requisitions/${encodeURIComponent(prId)}/approve`, { method: "PUT", body: {} });
+  await Promise.all([refreshPurchaseRequisitions(), refreshAuditMaybe()]);
+  toast(`อนุมัติใบ PR ${row.pr_no} แล้ว`);
+}
+
+async function unapprovePurchaseRequisition(prId) {
+  const row = state.prRequests.find((item) => item.pr_id === prId);
+  if (!row) return;
+  if (!(await confirmBox("ยืนยันถอยการอนุมัติ", `ต้องการถอยการอนุมัติใบ PR ${row.pr_no} ใช่ไหม? สถานะจะกลับเป็น PENDING`))) return;
+  await api(`/api/purchase-requisitions/${encodeURIComponent(prId)}/unapprove`, { method: "PUT", body: {} });
+  await Promise.all([refreshPurchaseRequisitions(), refreshAuditMaybe()]);
+  toast(`ถอยอนุมัติใบ PR ${row.pr_no} แล้ว`);
+}
+
+async function deletePurchaseRequisition(prId) {
+  const row = state.prRequests.find((item) => item.pr_id === prId);
+  if (!row) return;
+  if (!(await confirmBox("ยืนยันลบใบ PR", `ต้องการลบใบ PR ${row.pr_no} ใช่ไหม? ลบได้เฉพาะใบที่ยังไม่ได้รับอนุมัติ`))) return;
+  await api(`/api/purchase-requisitions/${encodeURIComponent(prId)}`, { method: "DELETE" });
+  await Promise.all([refreshPurchaseRequisitions(), refreshAuditMaybe()]);
+  toast(`ลบใบ PR ${row.pr_no} แล้ว`);
+}
+
+function editPurchaseRequisition(prId) {
+  const row = state.prRequests.find((item) => item.pr_id === prId);
+  if (!row) return;
+  state.editingPrId = prId;
+  const form = $("#prMetaForm");
+  form.pr_no.value = row.pr_no || "";
+  form.request_date.value = row.request_date || todayText();
+  form.requester.value = row.requester || state.user?.username || "";
+  form.department.value = row.department || "Laboratory";
+  state.prRows = (row.items || []).map((item) => ({
+    id: nextClientId("PRE"),
+    item_id: item.item_id || "",
+    name: item.item_name || "",
+    supplier: item.supplier || "",
+    order_qty: Number(item.order_qty || 0),
+    unit: item.unit || "",
+    unit_price: Number(item.unit_price || 0),
+    current_stock: item.current_stock || "",
+    lot: item.lot || "",
+    expiry: item.expiry || "",
+    reason: item.reason || "",
+    source: item.source || "edit",
+  }));
+  $("#prEditBanner").textContent = `กำลังแก้ไขใบ PR ${row.pr_no}${row.status === "APPROVED" ? " (อนุมัติแล้ว)" : ""}`;
+  $("#prEditBanner").classList.remove("hidden");
+  $("#cancelEditPrBtn").classList.remove("hidden");
+  $("#submitPrBtn").textContent = "บันทึกแก้ไขใบ PR";
+  renderPurchaseRequisition();
+  switchTab("pr");
+}
+
+function cancelPurchaseRequisitionEdit() {
+  resetPurchaseRequisitionEditor();
+  toast("ยกเลิกการแก้ไขใบ PR แล้ว");
+}
+
+function printSavedPurchaseRequisition(prId) {
+  const row = state.prRequests.find((item) => item.pr_id === prId);
+  if (!row) return;
+  printPrDocument({
+    pr_no: row.pr_no,
+    request_date: row.request_date,
+    requester: row.requester,
+    department: row.department,
+    approver: row.approver || row.approved_by,
+    status: row.status,
+    approved_by: row.approved_by,
+    approved_at: row.approved_at,
+  }, (row.items || []).map((item) => ({
+    ...item,
+    name: item.item_name,
+    expiry: item.expiry,
+  })));
+}
+
 function printPurchaseRequisition() {
   if (!state.prRows.length) return toast("กรุณาเพิ่มรายการในใบ PR ก่อนพิมพ์", true);
-  const meta = formData($("#prMetaForm"));
+  printPrDocument(formData($("#prMetaForm")), state.prRows);
+}
+
+function printPrDocument(meta, rowsData) {
+  const labName = state.branding.lab_name;
+  const logoSrc = state.branding.logo_data_url;
   const prNo = meta.pr_no || `PR-${dateInput(new Date()).replaceAll("-", "")}-${String(Date.now()).slice(-4)}`;
-  const total = state.prRows.reduce((sum, row) => sum + Number(row.order_qty || 0) * Number(row.unit_price || 0), 0);
-  const rows = state.prRows.map((row, index) => `
+  const showPrices = canViewPrices();
+  const total = showPrices ? rowsData.reduce((sum, row) => sum + Number(row.order_qty || 0) * Number(row.unit_price || 0), 0) : 0;
+  const rows = rowsData.map((row, index) => `
     <tr>
       <td>${index + 1}</td>
       <td>${esc(row.name)}</td>
@@ -509,10 +817,11 @@ function printPurchaseRequisition() {
       <td>${esc(row.expiry)}</td>
       <td>${esc(row.order_qty)}</td>
       <td>${esc(row.unit)}</td>
-      <td>${money(row.unit_price)}</td>
-      <td>${money(Number(row.order_qty || 0) * Number(row.unit_price || 0))}</td>
+      ${showPrices ? `<td>${money(row.unit_price)}</td><td>${money(Number(row.order_qty || 0) * Number(row.unit_price || 0))}</td>` : ""}
       <td>${esc(row.reason)}</td>
     </tr>`).join("");
+  const priceHeaders = showPrices ? "<th>ราคา/หน่วย</th><th>รวม</th>" : "";
+  const totalBlock = showPrices ? `<div class="total">รวมประมาณ: ${money(total)}</div>` : "";
   const win = window.open("", "_blank");
   win.document.open();
   win.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(prNo)}</title>
@@ -528,17 +837,19 @@ function printPurchaseRequisition() {
       button{margin-bottom:12px} @media print{button{display:none} body{margin:10mm}}
     </style></head><body>
     <button onclick="window.print()">พิมพ์ / Save PDF</button>
-    <header><img src="/logo-medical-trend.png" alt=""><div><h1>Purchase Requisition</h1><p>Medical Trend Lab Stock</p></div></header>
+    <header><img src="${esc(logoSrc)}" alt=""><div><h1>Purchase Requisition</h1><p>${esc(labName)} Lab Stock</p></div></header>
     <section class="meta">
       <div><strong>เลขที่ PR:</strong> ${esc(prNo)}</div>
       <div><strong>วันที่ขอซื้อ:</strong> ${esc(meta.request_date || dateInput(new Date()))}</div>
       <div><strong>แผนก:</strong> ${esc(meta.department || "")}</div>
       <div><strong>ผู้ขอซื้อ:</strong> ${esc(meta.requester || state.user?.username || "")}</div>
       <div><strong>ผู้อนุมัติ:</strong> ${esc(meta.approver || "")}</div>
-      <div><strong>หมายเหตุ:</strong> ${esc(meta.note || "")}</div>
+      <div><strong>สถานะ:</strong> ${esc(meta.status || "DRAFT")}</div>
+      <div><strong>อนุมัติโดย:</strong> ${esc(meta.approved_by || "")}</div>
+      <div><strong>อนุมัติเมื่อ:</strong> ${esc(formatDateTime(meta.approved_at || ""))}</div>
     </section>
-    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock</th><th>Lot</th><th>Exp</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th><th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="total">รวมประมาณ: ${money(total)}</div>
+    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock</th><th>Lot</th><th>Exp</th><th>จำนวน</th><th>หน่วย</th>${priceHeaders}<th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
+    ${totalBlock}
     <section class="signatures"><div class="sign">ผู้สั่งซื้อ / ผู้ขอซื้อ</div><div class="sign">ผู้บริหาร / ผู้อนุมัติ</div></section>
     </body></html>`);
   win.document.close();
@@ -548,7 +859,19 @@ function setDefaultPrMeta() {
   const form = $("#prMetaForm");
   form.request_date.value = todayText();
   form.requester.value = state.user?.username || "";
+  form.pr_no.value = "";
+  form.department.value = form.department.value || "Laboratory";
   renderPurchaseRequisition();
+}
+
+function resetPurchaseRequisitionEditor() {
+  state.editingPrId = "";
+  state.prRows = [];
+  $("#prEditBanner").textContent = "";
+  $("#prEditBanner").classList.add("hidden");
+  $("#cancelEditPrBtn").classList.add("hidden");
+  $("#submitPrBtn").textContent = "ส่งใบ PR เพื่ออนุมัติ";
+  setDefaultPrMeta();
 }
 
 function defaultPrQty(row) {
@@ -607,6 +930,19 @@ async function deleteItem(id) {
   toast("ลบรายการแล้ว");
 }
 
+async function toggleItemActive(id) {
+  const item = state.items.find((x) => x.item_id === id);
+  const active = Number(item?.is_active ?? 1) === 1;
+  const nextText = active ? "Inactive" : "Active";
+  const message = active
+    ? `ตั้ง ${item?.reagent_name || id} เป็น Inactive ใช่ไหม? รายการนี้จะไม่แสดงใน Dashboard และไม่ถูกคำนวณสถานะ/มูลค่า Stock`
+    : `เปิด ${item?.reagent_name || id} กลับมาเป็น Active ใช่ไหม? รายการนี้จะกลับไปคำนวณใน Dashboard ตามปกติ`;
+  if (!(await confirmBox(`ยืนยัน ${nextText} รายการน้ำยา`, message))) return;
+  await api(`/api/items/${encodeURIComponent(id)}/active`, { method: "PUT", body: { is_active: active ? 0 : 1 } });
+  await Promise.all([refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock(), refreshAuditMaybe()]);
+  toast(`เปลี่ยนสถานะเป็น ${nextText} แล้ว`);
+}
+
 function resetItemForm() {
   $("#itemForm").reset();
   $("#itemForm").item_id.value = "";
@@ -640,6 +976,7 @@ async function receiveStock(e) {
   state.lastLabels = res.labels;
   $("#lastLabels").classList.remove("hidden");
   $("#lastLabelsList").innerHTML = res.labels.map((l) => `<span class="chip">${esc(l.code)} ${l.type === "main" ? "(หน่วยหลัก)" : ""}</span>`).join("");
+  $("#receiveDialog").close();
   await Promise.all([refreshDashboard(), refreshStock(), refreshReprintStock(), refreshLotOptions(), refreshAuditMaybe()]);
   if (await confirmBox("พิมพ์ QR code", "ต้องการเปิดหน้าพิมพ์ / Save PDF ตอนนี้ไหม?")) await printLabels(res.labels);
 }
@@ -649,8 +986,8 @@ async function refreshLotOptions() {
   const itemId = form.item_id.value;
   if (!itemId) {
     state.lotOptions = [];
-    $("#lotOptions").innerHTML = "";
-    $("#lotHint").textContent = "เลือก Lot เดิมหรือพิมพ์ Lot ใหม่ได้";
+    if ($("#lotOptions")) $("#lotOptions").innerHTML = "";
+    if ($("#lotHint")) $("#lotHint").textContent = "เลือก Lot เดิมหรือพิมพ์ Lot ใหม่ได้";
     return;
   }
   const res = await api(`/api/lots?item_id=${encodeURIComponent(itemId)}`);
@@ -711,11 +1048,29 @@ async function printLabels(labels) {
 async function consumeFromForm(e) {
   e.preventDefault();
   const form = e.target;
+  clearTimeout(state.consumeScanTimer);
+  await consumeScannedBarcode(form);
+}
+
+function scheduleConsumeScan(e) {
+  clearTimeout(state.consumeScanTimer);
+  const form = e.target.form;
   const barcode = form.barcode.value.trim();
-  if (!barcode) return;
-  await consume({ barcode }, { scanned: true });
-  form.reset();
-  form.barcode.focus();
+  if (barcode.length < 8) return;
+  state.consumeScanTimer = setTimeout(() => consumeScannedBarcode(form), 420);
+}
+
+async function consumeScannedBarcode(form) {
+  const barcode = form.barcode.value.trim();
+  if (!barcode || state.consumeScanBusy) return;
+  state.consumeScanBusy = true;
+  try {
+    await consume({ barcode }, { scanned: true });
+    form.reset();
+    form.barcode.focus();
+  } finally {
+    state.consumeScanBusy = false;
+  }
 }
 
 async function manualConsume(code) {
@@ -749,6 +1104,70 @@ async function consume(data, options = {}) {
   }
 }
 
+async function previewBrandingLogo(e) {
+  const file = e.target.files[0];
+  if (!file) {
+    $("#brandingPreview").src = state.branding.logo_data_url;
+    return;
+  }
+  try {
+    const dataUrl = await readLogoFile(file);
+    $("#brandingPreview").src = dataUrl;
+  } catch (error) {
+    e.target.value = "";
+    $("#brandingPreview").src = state.branding.logo_data_url;
+    toast(error.message, true);
+  }
+}
+
+async function saveBranding(e) {
+  e.preventDefault();
+  const form = e.target;
+  let logoDataUrl = state.branding.logo_data_url.startsWith("data:") ? state.branding.logo_data_url : "";
+  const file = form.logo.files[0];
+  if (file) logoDataUrl = await readLogoFile(file);
+  const res = await api("/api/settings/branding", {
+    method: "PUT",
+    body: { lab_name: form.lab_name.value.trim(), logo_data_url: logoDataUrl },
+  });
+  state.branding = {
+    lab_name: res.branding.lab_name,
+    logo_data_url: res.branding.logo_data_url || "/logo-medical-trend.png",
+  };
+  form.logo.value = "";
+  applyBranding();
+  $("#brandingPreview").src = state.branding.logo_data_url;
+  await refreshAuditMaybe();
+  toast("บันทึก Logo / ชื่อแล็บแล้ว");
+}
+
+async function readLogoFile(file) {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error("กรุณาเลือกไฟล์ PNG, JPG หรือ WebP");
+  if (file.size > 500 * 1024) throw new Error("ไฟล์โลโก้ใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกิน 500 KB");
+  const dataUrl = await fileToDataUrl(file);
+  const size = await imageSize(dataUrl);
+  if (size.width !== size.height) throw new Error("โลโก้ต้องเป็นสัดส่วน 1:1 เช่น 512x512 px");
+  return dataUrl;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("อ่านไฟล์โลโก้ไม่สำเร็จ"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function imageSize(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error("ไฟล์รูปไม่ถูกต้อง"));
+    img.src = src;
+  });
+}
+
 async function saveExpiring(e) {
   e.preventDefault();
   await api("/api/settings/expiring-days", { method: "PUT", body: formData(e.target) });
@@ -760,6 +1179,20 @@ async function optimizeDb() {
   await api("/api/optimize", { method: "POST" });
   await Promise.all([refreshSettings(), refreshAuditMaybe()]);
   toast("ตรวจสอบ/Optimize database แล้ว");
+}
+
+async function changeOwnPassword(e) {
+  e.preventDefault();
+  const form = e.target;
+  const data = formData(form);
+  if (data.new_password !== data.confirm_password) {
+    toast("รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน", true);
+    return;
+  }
+  await api("/api/me/password", { method: "PUT", body: data });
+  form.reset();
+  await refreshAuditMaybe();
+  toast("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว");
 }
 
 async function clearDatabase(e) {
@@ -806,12 +1239,16 @@ function resetUserForm() { $("#userForm").reset(); $("#userForm").user_id.value 
 
 async function saveUser(e) {
   e.preventDefault();
-  const data = formData(e.target);
-  if (data.user_id) await api(`/api/users/${encodeURIComponent(data.user_id)}`, { method: "PUT", body: data });
-  else await api("/api/users", { method: "POST", body: data });
-  resetUserForm();
-  await Promise.all([refreshUsers(), refreshAuditMaybe(), refreshSettings()]);
-  toast("บันทึกผู้ใช้งานแล้ว");
+  try {
+    const data = formData(e.target);
+    if (data.user_id) await api(`/api/users/${encodeURIComponent(data.user_id)}`, { method: "PUT", body: data });
+    else await api("/api/users", { method: "POST", body: data });
+    resetUserForm();
+    await Promise.all([refreshUsers(), refreshAuditMaybe(), refreshSettings()]);
+    toast("บันทึกผู้ใช้งานแล้ว");
+  } catch (error) {
+    toast(error.message || "บันทึกผู้ใช้งานไม่สำเร็จ", true);
+  }
 }
 
 async function deleteUser(id) {
@@ -834,10 +1271,24 @@ function renderTable(table, cols, rows, formatters = {}, rowClass = null) {
   const tbody = $("tbody", table);
   tbody.innerHTML = rows.map((row) => `<tr class="${rowClass ? rowClass(row) : ""}">${cols.map(([k]) => {
     const raw = row[k] ?? "";
-    const value = formatters[k] ? formatters[k](raw, row) : esc(raw);
+    const value = formatters[k] ? formatters[k](raw, row) : formatDisplayValue(k, raw);
     return `<td data-key="${k}">${value}</td>`;
   }).join("")}</tr>`).join("");
   $$("th", table).forEach((th) => th.addEventListener("click", () => sortTable(table, th.cellIndex)));
+}
+
+function formatDisplayValue(key, value) {
+  if (isDateTimeKey(key)) return esc(formatDateTime(value));
+  if (isDateOnlyKey(key)) return esc(formatDateOnly(value));
+  return esc(value);
+}
+
+function isDateTimeKey(key) {
+  return ["timestamp", "created_at", "updated_at", "received_at", "used_at"].includes(key);
+}
+
+function isDateOnlyKey(key) {
+  return ["expiry", "expiry_date", "request_date"].includes(key);
 }
 
 function sortTable(table, index) {
@@ -884,6 +1335,31 @@ function enter(fn) { return (e) => { if (e.key === "Enter") { e.preventDefault()
 function money(v) { return Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function todayText() { return dateInput(new Date()); }
+function formatDateOnly(value) {
+  if (!value) return "";
+  const text = String(value);
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString("en-GB", { timeZone: "Asia/Bangkok", day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function formatDateTime(value) {
+  if (!value) return "";
+  const text = String(value);
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(text) ? text.replace(" ", "T") : text;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).replace(",", "");
+}
 function parseLocalDate(value) {
   const [y, m, d] = String(value).split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1);

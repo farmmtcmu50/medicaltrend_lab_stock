@@ -31,9 +31,11 @@ async function api(request, env) {
 
   const user = await requireUser(request, env);
   if (method === "GET" && path === "/me") return json({ ok: true, user: publicUser(user) });
-  if (method === "GET" && path === "/dashboard") return dashboard(request, env);
-  if (method === "GET" && path === "/items") return listItems(request, env);
+  if (method === "PUT" && path === "/me/password") return changeOwnPassword(request, env, user);
+  if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
+  if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
+  if (method === "PUT" && path.startsWith("/items/") && path.endsWith("/active")) return setItemActive(request, env, user, path.split("/")[2]);
   if (method === "PUT" && path.startsWith("/items/")) return updateItem(request, env, user, path.split("/")[2]);
   if (method === "DELETE" && path.startsWith("/items/")) return deleteItem(env, user, path.split("/")[2]);
   if (method === "GET" && path === "/lots") return listLots(request, env);
@@ -42,9 +44,14 @@ async function api(request, env) {
   if (method === "POST" && path === "/consume/preview") return consumePreview(request, env, user);
   if (method === "POST" && path === "/consume") return consumeStock(request, env, user);
   if (method === "POST" && path === "/labels") return labelPdf(request, env);
-  if (method === "GET" && path === "/reports") return movementReport(request, env);
+  if (method === "GET" && path === "/reports") return movementReport(request, env, user);
+  if (method === "GET" && path === "/purchase-requisitions") return listPurchaseRequisitions(env, user);
+  if (method === "POST" && path === "/purchase-requisitions") return createPurchaseRequisition(request, env, user);
+  if (method === "PUT" && path.startsWith("/purchase-requisitions/") && !path.endsWith("/approve") && !path.endsWith("/unapprove")) return updatePurchaseRequisition(request, env, user, path.split("/")[2]);
+  if (method === "DELETE" && path.startsWith("/purchase-requisitions/")) return deletePurchaseRequisition(env, user, path.split("/")[2]);
   if (method === "GET" && path === "/settings") return getSettings(env);
   if (method === "PUT" && path === "/settings/expiring-days") return setExpiringDays(request, env, user);
+  if (method === "PUT" && path === "/settings/branding") return setBranding(request, env, user);
   if (method === "GET" && path === "/export/excel") return exportExcel(env, user, false);
   if (method === "GET" && path === "/backup") return backup(env, user);
   if (method === "POST" && path === "/optimize") return optimize(env, user);
@@ -54,6 +61,12 @@ async function api(request, env) {
   if (method === "POST" && path === "/users") return addUser(request, env, admin);
   if (method === "PUT" && path.startsWith("/users/")) return updateUser(request, env, admin, path.split("/")[2]);
   if (method === "DELETE" && path.startsWith("/users/")) return deleteUser(env, admin, path.split("/")[2]);
+  if (method === "PUT" && path.startsWith("/purchase-requisitions/") && path.endsWith("/approve")) {
+    return approvePurchaseRequisition(request, env, admin, path.split("/")[2]);
+  }
+  if (method === "PUT" && path.startsWith("/purchase-requisitions/") && path.endsWith("/unapprove")) {
+    return unapprovePurchaseRequisition(request, env, admin, path.split("/")[2]);
+  }
   if (method === "GET" && path === "/audit") return auditLogs(env, admin);
   if (method === "GET" && path === "/export/audit") return exportExcel(env, admin, true);
   if (method === "POST" && path === "/restore") return restore(request, env, admin);
@@ -98,9 +111,10 @@ async function logout(env, request) {
   return json({ ok: true }, 200, { "set-cookie": `${env.SESSION_COOKIE || "mt_stock_session"}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}` });
 }
 
-async function dashboard(request, env) {
+async function dashboard(request, env, user) {
   const url = new URL(request.url);
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
+  const machine = (url.searchParams.get("machine") || "").trim().toLowerCase();
   const expiringDays = await expiringDaysSetting(env);
   const rows = await env.DB.prepare(
     `SELECT i.item_id, i.reagent_name AS name, i.machine, i.main_unit, i.sub_unit, i.sub_per_main,
@@ -110,10 +124,13 @@ async function dashboard(request, env) {
             GROUP_CONCAT(DISTINCT CASE WHEN s.status = 'IN_STOCK' THEN s.lot END) AS lots
      FROM items i
      LEFT JOIN stock_units s ON s.item_id = i.item_id AND s.status = 'IN_STOCK'
-     WHERE i.is_deleted = 0 AND (? = '%%' OR lower(i.reagent_name) LIKE ? OR lower(i.machine) LIKE ? OR lower(i.supplier) LIKE ?)
+     WHERE i.is_deleted = 0 AND i.is_active = 1
+       AND (? = '' OR lower(i.machine) = ?)
+       AND (? = '%%' OR lower(i.reagent_name) LIKE ? OR lower(i.machine) LIKE ? OR lower(i.supplier) LIKE ?)
      GROUP BY i.item_id
      ORDER BY lower(i.reagent_name)`
-  ).bind(q, q, q, q).all();
+  ).bind(machine, machine, q, q, q, q).all();
+  const machines = await machineOptions(env, true);
 
   const today = dateOnly(new Date());
   const data = (rows.results || []).map((row) => {
@@ -138,18 +155,40 @@ async function dashboard(request, env) {
       stock_value: round(qtySub * unitPrice),
     };
   });
-  return json({ ok: true, rows: data, expiring_days: expiringDays, total_value: round(data.reduce((sum, row) => sum + row.stock_value, 0)) });
+  const totalValue = round(data.reduce((sum, row) => sum + row.stock_value, 0));
+  return json({
+    ok: true,
+    rows: canViewPrices(user) ? data : data.map(stripPriceFields),
+    machines,
+    expiring_days: expiringDays,
+    total_value: canViewPrices(user) ? totalValue : null,
+    can_view_prices: canViewPrices(user),
+  });
 }
 
-async function listItems(request, env) {
+async function listItems(request, env, user) {
   const url = new URL(request.url);
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
+  const machine = (url.searchParams.get("machine") || "").trim().toLowerCase();
   const rows = await env.DB.prepare(
     `SELECT * FROM items
-     WHERE is_deleted = 0 AND (? = '%%' OR lower(reagent_name) LIKE ? OR lower(machine) LIKE ? OR lower(supplier) LIKE ?)
+     WHERE is_deleted = 0
+       AND (? = '' OR lower(machine) = ?)
+       AND (? = '%%' OR lower(reagent_name) LIKE ? OR lower(machine) LIKE ? OR lower(supplier) LIKE ?)
      ORDER BY lower(reagent_name)`
-  ).bind(q, q, q, q).all();
-  return json({ ok: true, rows: rows.results || [] });
+  ).bind(machine, machine, q, q, q, q).all();
+  const data = rows.results || [];
+  return json({ ok: true, rows: canViewPrices(user) ? data : data.map(stripPriceFields), machines: await machineOptions(env, false), can_view_prices: canViewPrices(user) });
+}
+
+async function machineOptions(env, activeOnly = false) {
+  const rows = await env.DB.prepare(
+    `SELECT DISTINCT machine
+     FROM items
+     WHERE is_deleted = 0 ${activeOnly ? "AND is_active = 1" : ""} AND machine IS NOT NULL AND trim(machine) <> ''
+     ORDER BY lower(machine)`
+  ).all();
+  return (rows.results || []).map((row) => row.machine);
 }
 
 async function addItem(request, env, user) {
@@ -158,8 +197,8 @@ async function addItem(request, env, user) {
   await env.DB.prepare(
     `INSERT INTO items
      (item_id, reagent_name, machine, main_unit, sub_unit, sub_per_main, supplier, unit_price, main_unit_price,
-      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, is_active, is_deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`
   ).bind(itemId, data.reagent_name, data.machine, data.main_unit, data.sub_unit, data.sub_per_main, data.supplier,
     data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), now(), user.username, user.username).run();
   await logAudit(env, user.username, "ADD_ITEM", "item", itemId, "SUCCESS", data);
@@ -167,8 +206,12 @@ async function addItem(request, env, user) {
 }
 
 async function updateItem(request, env, user, itemId) {
-  const before = await getActiveItem(env, itemId);
+  const before = await getExistingItem(env, itemId);
   const data = cleanItem(await readBody(request));
+  if (!canViewPrices(user)) {
+    data.unit_price = Number(before.unit_price || 0);
+    data.main_unit_price = Number(before.main_unit_price || 0);
+  }
   await env.DB.prepare(
     `UPDATE items SET reagent_name = ?, machine = ?, main_unit = ?, sub_unit = ?, sub_per_main = ?, supplier = ?,
       unit_price = ?, main_unit_price = ?, lead_time_days = ?, reorder_point_sub = ?, updated_at = ?, updated_by = ?
@@ -186,10 +229,19 @@ async function updateItem(request, env, user, itemId) {
 }
 
 async function deleteItem(env, user, itemId) {
-  const item = await getActiveItem(env, itemId);
+  const item = await getExistingItem(env, itemId);
   await env.DB.prepare("UPDATE items SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE item_id = ?").bind(now(), user.username, itemId).run();
   await logAudit(env, user.username, "DELETE_ITEM", "item", itemId, "SUCCESS", { name: item.reagent_name });
   return json({ ok: true });
+}
+
+async function setItemActive(request, env, user, itemId) {
+  const item = await getExistingItem(env, itemId);
+  const body = await readBody(request);
+  const isActive = body.is_active === false || body.is_active === 0 || body.is_active === "0" ? 0 : 1;
+  await env.DB.prepare("UPDATE items SET is_active = ?, updated_at = ?, updated_by = ? WHERE item_id = ? AND is_deleted = 0").bind(isActive, now(), user.username, itemId).run();
+  await logAudit(env, user.username, isActive ? "ACTIVATE_ITEM" : "INACTIVATE_ITEM", "item", itemId, "SUCCESS", { name: item.reagent_name });
+  return json({ ok: true, is_active: isActive });
 }
 
 async function listLots(request, env) {
@@ -341,7 +393,7 @@ async function consumeStock(request, env, user) {
   return json({ ok: true, consumed: requestedQty });
 }
 
-async function movementReport(request, env) {
+async function movementReport(request, env, user) {
   const url = new URL(request.url);
   const reportType = url.searchParams.get("type") === "consume" ? "consume" : "receive";
   const today = dateOnly(new Date());
@@ -364,7 +416,144 @@ async function movementReport(request, env) {
   const data = rows.results || [];
   const totalQty = data.reduce((sum, row) => sum + Number(row.quantity_sub || 0), 0);
   const items = new Set(data.map((row) => row.item_id).filter(Boolean)).size;
-  return json({ ok: true, report_type: reportType, from: start, to: end, rows: data, summary: { rows: data.length, quantity_sub: totalQty, items } });
+  return json({ ok: true, report_type: reportType, from: start, to: end, rows: data, summary: { rows: data.length, quantity_sub: totalQty, items }, can_view_prices: canViewPrices(user) });
+}
+
+async function listPurchaseRequisitions(env, user) {
+  const query = canViewPrices(user)
+    ? "SELECT * FROM purchase_requisitions ORDER BY created_at DESC LIMIT 300"
+    : "SELECT * FROM purchase_requisitions WHERE requested_by = ? ORDER BY created_at DESC LIMIT 300";
+  const result = canViewPrices(user)
+    ? await env.DB.prepare(query).all()
+    : await env.DB.prepare(query).bind(user.username).all();
+  const rows = result.results || [];
+  for (const row of rows) {
+    const items = await env.DB.prepare("SELECT * FROM purchase_requisition_items WHERE pr_id = ? ORDER BY rowid").bind(row.pr_id).all();
+    row.items = canViewPrices(user) ? (items.results || []) : (items.results || []).map(stripPriceFields);
+    row.total_value = canViewPrices(user) ? round(row.items.reduce((sum, item) => sum + Number(item.order_qty || 0) * Number(item.unit_price || 0), 0)) : null;
+  }
+  return json({ ok: true, rows, can_view_prices: canViewPrices(user), can_approve_pr: canViewPrices(user) });
+}
+
+async function createPurchaseRequisition(request, env, user) {
+  const body = await readBody(request);
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (!items.length) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
+  const prId = nextId("PRQ");
+  const prNo = String(body.pr_no || "").trim() || `PR-${compactDate()}-${prId.slice(-4)}`;
+  const requestDate = validDate(body.request_date) || dateOnly(new Date());
+  const requester = String(body.requester || user.username).trim() || user.username;
+  const department = String(body.department || "").trim();
+  const approver = "";
+  const note = "";
+  const nowText = now();
+  const batch = [
+    env.DB.prepare(
+      `INSERT INTO purchase_requisitions
+       (pr_id, pr_no, request_date, requester, department, approver, note, status, requested_by, approved_by, approved_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, '', NULL, ?, ?)`
+    ).bind(prId, prNo, requestDate, requester, department, approver, note, user.username, nowText, nowText),
+  ];
+  items.forEach((item) => {
+    const itemName = String(item.name || item.item_name || "").trim();
+    if (!itemName) return;
+    batch.push(env.DB.prepare(
+      `INSERT INTO purchase_requisition_items
+       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      nextId("PRI"), prId, String(item.item_id || ""), itemName, String(item.supplier || ""),
+      String(item.current_stock || ""), String(item.lot || ""), String(item.expiry || ""),
+      Math.max(0, Number(item.order_qty || 0)), String(item.unit || ""),
+      canViewPrices(user) ? Number(item.unit_price || 0) : 0,
+      String(item.reason || ""), String(item.source || "")
+    ));
+  });
+  if (batch.length < 2) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
+  await env.DB.batch(batch);
+  await logAudit(env, user.username, "CREATE_PR", "purchase_requisition", prNo, "SUCCESS", { pr_id: prId, lines: batch.length - 1 });
+  return json({ ok: true, pr_id: prId, pr_no: prNo });
+}
+
+async function approvePurchaseRequisition(request, env, admin, prId) {
+  const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
+  if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  if (pr.status === "APPROVED") throw httpError("ใบ PR นี้อนุมัติแล้ว", 409);
+  await readBody(request);
+  const approver = admin.username;
+  await env.DB.prepare(
+    "UPDATE purchase_requisitions SET status = 'APPROVED', approver = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE pr_id = ?"
+  ).bind(approver, admin.username, now(), now(), prId).run();
+  await logAudit(env, admin.username, "APPROVE_PR", "purchase_requisition", pr.pr_no, "SUCCESS", { pr_id: prId, approver });
+  return json({ ok: true });
+}
+
+async function unapprovePurchaseRequisition(request, env, admin, prId) {
+  const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
+  if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  if (pr.status !== "APPROVED") throw httpError("ถอยอนุมัติได้เฉพาะใบ PR ที่อนุมัติแล้วเท่านั้น", 409);
+  await readBody(request);
+  await env.DB.prepare(
+    "UPDATE purchase_requisitions SET status = 'PENDING', approver = '', approved_by = '', approved_at = NULL, updated_at = ? WHERE pr_id = ?"
+  ).bind(now(), prId).run();
+  await logAudit(env, admin.username, "UNAPPROVE_PR", "purchase_requisition", pr.pr_no, "SUCCESS", { pr_id: prId, previous_approved_by: pr.approved_by, previous_approved_at: pr.approved_at });
+  return json({ ok: true });
+}
+
+async function updatePurchaseRequisition(request, env, user, prId) {
+  const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
+  if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  if (user.role !== "admin" && pr.status !== "PENDING") throw httpError("แก้ไขได้เฉพาะใบ PR ที่ยังไม่ได้รับอนุมัติเท่านั้น", 409);
+  if (user.role !== "admin" && pr.requested_by !== user.username) throw httpError("แก้ไขได้เฉพาะใบ PR ที่ตัวเอง submit เท่านั้น", 403);
+  const body = await readBody(request);
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (!items.length) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนบันทึกแก้ไข");
+  const prNo = String(body.pr_no || pr.pr_no || "").trim();
+  const duplicate = await env.DB.prepare("SELECT pr_id FROM purchase_requisitions WHERE pr_no = ? AND pr_id <> ?").bind(prNo, prId).first();
+  if (duplicate) throw httpError("เลขที่ PR นี้มีอยู่แล้ว");
+  const requestDate = validDate(body.request_date) || pr.request_date || dateOnly(new Date());
+  const requester = String(body.requester || pr.requester || user.username).trim() || user.username;
+  const department = String(body.department || pr.department || "").trim();
+  const batch = [
+    env.DB.prepare(
+      `UPDATE purchase_requisitions
+       SET pr_no = ?, request_date = ?, requester = ?, department = ?, updated_at = ?
+       WHERE pr_id = ?`
+    ).bind(prNo, requestDate, requester, department, now(), prId),
+    env.DB.prepare("DELETE FROM purchase_requisition_items WHERE pr_id = ?").bind(prId),
+  ];
+  items.forEach((item) => {
+    const itemName = String(item.name || item.item_name || "").trim();
+    if (!itemName) return;
+    batch.push(env.DB.prepare(
+      `INSERT INTO purchase_requisition_items
+       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      nextId("PRI"), prId, String(item.item_id || ""), itemName, String(item.supplier || ""),
+      String(item.current_stock || ""), String(item.lot || ""), String(item.expiry || ""),
+      Math.max(0, Number(item.order_qty || 0)), String(item.unit || ""),
+      canViewPrices(user) ? Number(item.unit_price || 0) : Number(item.unit_price || 0),
+      String(item.reason || ""), String(item.source || "")
+    ));
+  });
+  if (batch.length < 3) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนบันทึกแก้ไข");
+  await env.DB.batch(batch);
+  await logAudit(env, user.username, "UPDATE_PR", "purchase_requisition", prNo, "SUCCESS", { pr_id: prId, lines: batch.length - 2 });
+  return json({ ok: true, pr_id: prId, pr_no: prNo });
+}
+
+async function deletePurchaseRequisition(env, user, prId) {
+  const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
+  if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  if (pr.status !== "PENDING") throw httpError("ลบได้เฉพาะใบ PR ที่ยังไม่ได้รับอนุมัติเท่านั้น", 409);
+  if (pr.requested_by !== user.username && user.role !== "admin") throw httpError("ลบได้เฉพาะใบ PR ที่ตัวเอง submit เท่านั้น", 403);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM purchase_requisition_items WHERE pr_id = ?").bind(prId),
+    env.DB.prepare("DELETE FROM purchase_requisitions WHERE pr_id = ?").bind(prId),
+  ]);
+  await logAudit(env, user.username, "DELETE_PR", "purchase_requisition", pr.pr_no, "SUCCESS", { pr_id: prId, requested_by: pr.requested_by });
+  return json({ ok: true });
 }
 
 async function findStockTarget(env, barcode) {
@@ -432,14 +621,21 @@ async function makeLabelHtml(labels) {
 
 async function getSettings(env) {
   const expiringDays = await expiringDaysSetting(env);
+  const labName = await settingValue(env, "lab_name", "Medical Trend");
+  const logoDataUrl = await settingValue(env, "logo_data_url", "");
   const info = await Promise.all([
-    count(env, "items", "is_deleted = 0"),
+    count(env, "items", "is_deleted = 0 AND is_active = 1"),
     count(env, "stock_units", "status = 'IN_STOCK'"),
     count(env, "package_barcodes", "status = 'IN_STOCK'"),
     count(env, "users", "is_active = 1"),
     count(env, "audit_logs", "1 = 1"),
   ]);
-  return json({ ok: true, expiring_days: expiringDays, info: { items: info[0], stock_units: info[1], packages: info[2], active_users: info[3], audit_logs: info[4] } });
+  return json({
+    ok: true,
+    expiring_days: expiringDays,
+    branding: { lab_name: labName, logo_data_url: logoDataUrl },
+    info: { items: info[0], stock_units: info[1], packages: info[2], active_users: info[3], audit_logs: info[4] },
+  });
 }
 
 async function setExpiringDays(request, env, user) {
@@ -447,6 +643,41 @@ async function setExpiringDays(request, env, user) {
   const value = String(int(body.value, 90));
   await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('expiring_days', ?, ?)").bind(value, now()).run();
   await logAudit(env, user.username, "UPDATE_SETTING", "setting", "expiring_days", "SUCCESS", { value });
+  return json({ ok: true });
+}
+
+async function setBranding(request, env, user) {
+  const body = await readBody(request);
+  const labName = String(body.lab_name || "").trim();
+  const logoDataUrl = String(body.logo_data_url || "").trim();
+  if (!labName) throw httpError("กรุณาระบุชื่อแล็บ");
+  if (labName.length > 120) throw httpError("ชื่อแล็บยาวเกินไป");
+  if (logoDataUrl && !/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(logoDataUrl)) throw httpError("ไฟล์โลโก้ต้องเป็นรูปภาพ PNG/JPG/WebP");
+  if (logoDataUrl.length > 700000) throw httpError("ไฟล์โลโก้ใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกินประมาณ 500 KB");
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('lab_name', ?, ?)").bind(labName, now()),
+    env.DB.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('logo_data_url', ?, ?)").bind(logoDataUrl, now()),
+  ]);
+  await logAudit(env, user.username, "UPDATE_BRANDING", "setting", "branding", "SUCCESS", { lab_name: labName, has_logo: Boolean(logoDataUrl) });
+  return json({ ok: true, branding: { lab_name: labName, logo_data_url: logoDataUrl } });
+}
+
+async function changeOwnPassword(request, env, user) {
+  const body = await readBody(request);
+  const currentPassword = String(body.current_password || "");
+  const newPassword = String(body.new_password || "");
+  const confirmPassword = String(body.confirm_password || "");
+  if (!currentPassword || !newPassword || !confirmPassword) throw httpError("กรุณากรอกรหัสผ่านให้ครบ");
+  if (newPassword !== confirmPassword) throw httpError("รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน");
+  if (newPassword.length < 4) throw httpError("รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร");
+  if (!(await verifyPassword(currentPassword, user.salt, user.password_hash))) {
+    await logAudit(env, user.username, "CHANGE_OWN_PASSWORD_FAILED", "user", user.username, "FAIL");
+    throw httpError("รหัสผ่านเดิมไม่ถูกต้อง", 403);
+  }
+  const hp = await hashPassword(newPassword);
+  await env.DB.prepare("UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE user_id = ?")
+    .bind(hp.hash, hp.salt, now(), user.user_id).run();
+  await logAudit(env, user.username, "CHANGE_OWN_PASSWORD", "user", user.username);
   return json({ ok: true });
 }
 
@@ -461,11 +692,21 @@ async function addUser(request, env, admin) {
   const password = String(body.password || "").trim();
   const role = body.role === "admin" ? "admin" : "staff";
   if (!username || !password) throw httpError("กรุณากรอก username และ password");
+  const existing = await env.DB.prepare("SELECT * FROM users WHERE lower(username) = lower(?)").bind(username).first();
+  if (existing?.is_active) throw httpError("username นี้มีอยู่แล้ว");
   const hp = await hashPassword(password);
-  await env.DB.prepare(
-    `INSERT INTO users (user_id, username, password_hash, salt, role, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
-  ).bind(nextId("USR"), username, hp.hash, hp.salt, role, now(), now()).run();
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE users
+       SET username = ?, password_hash = ?, salt = ?, role = ?, is_active = 1, updated_at = ?
+       WHERE user_id = ?`
+    ).bind(username, hp.hash, hp.salt, role, now(), existing.user_id).run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO users (user_id, username, password_hash, salt, role, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(nextId("USR"), username, hp.hash, hp.salt, role, now(), now()).run();
+  }
   await logAudit(env, admin.username, "ADD_USER", "user", username, "SUCCESS", { role });
   return json({ ok: true });
 }
@@ -477,6 +718,8 @@ async function updateUser(request, env, admin, userId) {
   const username = String(body.username || "").trim();
   const role = body.role === "admin" ? "admin" : "staff";
   if (!username) throw httpError("กรุณากรอก username");
+  const duplicate = await env.DB.prepare("SELECT user_id FROM users WHERE lower(username) = lower(?) AND user_id <> ? AND is_active = 1").bind(username, userId).first();
+  if (duplicate) throw httpError("username นี้มีอยู่แล้ว");
   if (target.role === "admin" && role !== "admin") {
     const admins = await count(env, "users", "role = 'admin' AND is_active = 1");
     if (admins <= 1) throw httpError("ไม่สามารถเปลี่ยน admin คนสุดท้ายเป็น staff");
@@ -515,8 +758,15 @@ async function exportExcel(env, user, auditOnly) {
         StockUnits: await tableRows(env, "stock_units", "ORDER BY received_at DESC"),
         PackageBarcodes: await tableRows(env, "package_barcodes", "ORDER BY received_at DESC"),
         Movements: await tableRows(env, "movements", "ORDER BY timestamp DESC"),
+        PurchaseRequisitions: await tableRows(env, "purchase_requisitions", "ORDER BY created_at DESC"),
+        PurchaseRequisitionItems: await tableRows(env, "purchase_requisition_items"),
         AuditTrail: await tableRows(env, "audit_logs", "ORDER BY timestamp DESC"),
       };
+  if (!auditOnly && !canViewPrices(user)) {
+    sheets.Items = sheets.Items.map(stripPriceFields);
+    sheets.PurchaseRequisitionItems = sheets.PurchaseRequisitionItems.map(stripPriceFields);
+    delete sheets.AuditTrail;
+  }
   await logAudit(env, user.username, auditOnly ? "EXPORT_AUDIT_EXCEL" : "EXPORT_EXCEL", "file", auditOnly ? "audit.xls" : "lab_stock.xls");
   const xml = spreadsheetXml(sheets);
   return new Response(xml, {
@@ -528,18 +778,25 @@ async function exportExcel(env, user, auditOnly) {
 }
 
 async function backup(env, user) {
+  const items = await tableRows(env, "items");
   const data = {
     exported_at: now(),
     tables: {
-      items: await tableRows(env, "items"),
+      items: canViewPrices(user) ? items : items.map(stripPriceFields),
       stock_units: await tableRows(env, "stock_units"),
       package_barcodes: await tableRows(env, "package_barcodes"),
       movements: await tableRows(env, "movements"),
+      purchase_requisitions: await tableRows(env, "purchase_requisitions"),
+      purchase_requisition_items: canViewPrices(user)
+        ? await tableRows(env, "purchase_requisition_items")
+        : (await tableRows(env, "purchase_requisition_items")).map(stripPriceFields),
       settings: await tableRows(env, "settings"),
-      users: await tableRows(env, "users"),
-      audit_logs: await tableRows(env, "audit_logs"),
     },
   };
+  if (canViewPrices(user)) {
+    data.tables.users = await tableRows(env, "users");
+    data.tables.audit_logs = await tableRows(env, "audit_logs");
+  }
   await logAudit(env, user.username, "BACKUP_DATABASE", "database", "json");
   return new Response(JSON.stringify(data, null, 2), {
     headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="lab_stock_backup_${compactDate()}.json"` },
@@ -549,7 +806,7 @@ async function backup(env, user) {
 async function restore(request, env, admin) {
   const body = await readBody(request);
   if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
-  const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
+  const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -562,6 +819,8 @@ async function clearDatabase(request, env, admin) {
     env.DB.prepare("DELETE FROM stock_units"),
     env.DB.prepare("DELETE FROM package_barcodes"),
     env.DB.prepare("DELETE FROM movements"),
+    env.DB.prepare("DELETE FROM purchase_requisition_items"),
+    env.DB.prepare("DELETE FROM purchase_requisitions"),
     env.DB.prepare("UPDATE items SET is_deleted = 1, updated_at = ?").bind(now()),
   ]);
   await logAudit(env, admin.username, "CLEAR_DATABASE", "database", "d1");
@@ -578,6 +837,8 @@ async function optimize(env, user) {
 async function replaceTables(env, tables) {
   const stmts = [
     env.DB.prepare("DELETE FROM audit_logs"),
+    env.DB.prepare("DELETE FROM purchase_requisition_items"),
+    env.DB.prepare("DELETE FROM purchase_requisitions"),
     env.DB.prepare("DELETE FROM movements"),
     env.DB.prepare("DELETE FROM stock_units"),
     env.DB.prepare("DELETE FROM package_barcodes"),
@@ -585,7 +846,7 @@ async function replaceTables(env, tables) {
     env.DB.prepare("DELETE FROM settings"),
     env.DB.prepare("DELETE FROM users"),
   ];
-  const order = ["items", "stock_units", "package_barcodes", "movements", "settings", "users", "audit_logs"];
+  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs"];
   for (const table of order) {
     for (const row of tables[table] || []) {
       const keys = Object.keys(row);
@@ -609,7 +870,22 @@ async function requireAdmin(user) {
   return user;
 }
 
+function canViewPrices(user) {
+  return user?.role === "admin";
+}
+
+function stripPriceFields(row) {
+  const { unit_price, main_unit_price, stock_value, ...rest } = row;
+  return rest;
+}
+
 async function getActiveItem(env, itemId) {
+  const item = await env.DB.prepare("SELECT * FROM items WHERE item_id = ? AND is_deleted = 0 AND is_active = 1").bind(itemId).first();
+  if (!item) throw httpError("ไม่พบรายการน้ำยาที่ active", 404);
+  return item;
+}
+
+async function getExistingItem(env, itemId) {
   const item = await env.DB.prepare("SELECT * FROM items WHERE item_id = ? AND is_deleted = 0").bind(itemId).first();
   if (!item) throw httpError("ไม่พบรายการน้ำยา", 404);
   return item;
@@ -638,6 +914,11 @@ function cleanItem(body) {
 async function expiringDaysSetting(env) {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'expiring_days'").first();
   return int(row?.value, 90);
+}
+
+async function settingValue(env, key, fallback = "") {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first();
+  return row?.value ?? fallback;
 }
 
 async function logAudit(env, username, action, targetType = "", targetId = "", result = "SUCCESS", details = null) {

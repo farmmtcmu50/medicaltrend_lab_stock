@@ -14,6 +14,8 @@ TABLES = [
     "stock_units",
     "package_barcodes",
     "movements",
+    "purchase_requisitions",
+    "purchase_requisition_items",
     "settings",
     "users",
     "audit_logs",
@@ -38,6 +40,14 @@ D1_COLUMNS = {
         "movement_id", "timestamp", "type", "barcode", "item_id", "reagent_name", "lot",
         "quantity_sub", "operator_note", "operator_username",
     ],
+    "purchase_requisitions": [
+        "pr_id", "pr_no", "request_date", "requester", "department", "approver", "note",
+        "status", "requested_by", "approved_by", "approved_at", "created_at", "updated_at",
+    ],
+    "purchase_requisition_items": [
+        "line_id", "pr_id", "item_id", "item_name", "supplier", "current_stock", "lot",
+        "expiry", "order_qty", "unit", "unit_price", "reason", "source",
+    ],
     "settings": ["key", "value", "updated_at"],
     "users": ["user_id", "username", "password_hash", "salt", "role", "is_active", "created_at", "updated_at"],
     "audit_logs": ["audit_id", "timestamp", "username", "action", "target_type", "target_id", "result", "details"],
@@ -61,6 +71,14 @@ DEFAULTS = {
         "type": "", "barcode": "", "item_id": "", "reagent_name": "", "lot": "",
         "quantity_sub": 0, "operator_note": "", "operator_username": "",
     },
+    "purchase_requisitions": {
+        "requester": "", "department": "", "approver": "", "note": "", "status": "PENDING",
+        "requested_by": "", "approved_by": "",
+    },
+    "purchase_requisition_items": {
+        "item_id": "", "item_name": "", "supplier": "", "current_stock": "", "lot": "",
+        "expiry": "", "order_qty": 0, "unit": "", "unit_price": 0, "reason": "", "source": "",
+    },
     "settings": {},
     "users": {"role": "staff", "is_active": 1},
     "audit_logs": {"username": "", "action": "", "target_type": "", "target_id": "", "result": "SUCCESS", "details": ""},
@@ -71,6 +89,7 @@ DATE_FIELDS = {
     "stock_units": ["received_at"],
     "package_barcodes": ["received_at"],
     "movements": ["timestamp"],
+    "purchase_requisitions": ["request_date", "created_at", "updated_at"],
     "settings": ["updated_at"],
     "users": ["created_at", "updated_at"],
     "audit_logs": ["timestamp"],
@@ -100,7 +119,10 @@ def main():
     for table in reversed(TABLES):
         lines.append(f"DELETE FROM {table};")
     for table in TABLES:
-        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        try:
+            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            rows = []
         for row in rows:
             data = dict(row)
             if table == "users":

@@ -53,6 +53,7 @@ button:active, .button:active { transform: translateY(1px); }
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 700; }
 .primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+.warning { background: #fff0c4; border-color: #f2c94c; color: #704400; font-weight: 700; }
 .danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
 .ghost { background: transparent; }
 .hidden { display: none !important; }
@@ -93,6 +94,16 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
   box-shadow: 0 10px 24px rgba(20, 35, 60, .08);
 }
 .login-panel h1 { margin: 0; font-size: 38px; line-height: 1; }
+.login-error {
+  margin: -4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #f2b8b5;
+  border-radius: 8px;
+  background: #fff0ef;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 650;
+}
 
 .app {
   min-height: 100vh;
@@ -138,6 +149,17 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .brand em { margin-top: 2px; color: #c9d8ee; font-size: 13px; font-style: normal; }
 .brand small { margin-top: 6px; color: #99a8bd; }
 .sidebar nav { display: grid; gap: 7px; }
+.nav-group {
+  display: grid;
+  gap: 5px;
+}
+.nav-children {
+  display: grid;
+  gap: 5px;
+  margin-left: 22px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255,255,255,.12);
+}
 .nav {
   width: 100%;
   min-height: 44px;
@@ -147,6 +169,12 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
   color: #dce7f8;
   padding: 9px 10px;
   box-shadow: none;
+}
+.nav-sub {
+  min-height: 36px;
+  padding: 7px 10px;
+  color: #c9d8ee;
+  font-size: 13px;
 }
 .nav-icon {
   width: 26px;
@@ -182,6 +210,12 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
   margin-top: auto;
   color: #fff;
   border-color: rgba(255,255,255,.14);
+}
+.sidebar-copy {
+  margin: -10px 4px 0;
+  color: #93a4bd;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .content {
@@ -246,16 +280,48 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
   gap: 16px;
   margin-bottom: 14px;
 }
+.page-head > div:first-child {
+  flex: 0 0 auto;
+  min-width: 180px;
+  max-width: 320px;
+}
 .page-head h2, .page-head h3 {
   margin: 0 0 4px;
-  line-height: 1.25;
+  line-height: 1.15;
 }
-.page-head h2 { font-size: 26px; font-weight: 700; }
+.page-head h2 { font-size: 22px; font-weight: 700; }
+.page-head .muted { font-size: 13px; }
 .page-head.compact { align-items: center; margin-bottom: 10px; }
 .toolbar, .button-row {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.toolbar {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.toolbar input {
+  min-width: 260px;
+  flex: 1 1 520px;
+}
+.toolbar select {
+  min-width: 118px;
+  max-width: 150px;
+  flex: 0 0 auto;
+}
+#dashboardMachineFilter,
+#itemMachineFilter {
+  width: 128px;
+}
+.toolbar button,
+.toolbar .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.button-row {
   flex-wrap: wrap;
 }
 .button-row.end { justify-content: flex-end; }
@@ -334,6 +400,15 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 }
 .stack { display: grid; gap: 12px; }
 .span-2 { grid-column: span 2; }
+.edit-banner {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #b9d3ff;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #174d9a;
+  font-weight: 700;
+}
 label {
   display: grid;
   gap: 6px;
@@ -425,6 +500,10 @@ tr.REORDER td { background: #eef5ff; }
 .badge.OK { background: #ddf7ed; color: var(--ok); }
 .badge.CRITICAL, .badge.EXPIRED { background: #ffe2df; color: var(--critical); }
 .badge.EXPIRING, .badge.REORDER { background: #fff0c4; color: var(--warn); }
+.badge.INACTIVE { background: #e8edf5; color: #526174; }
+.badge.ACTIVE { background: #ddf7ed; color: var(--ok); }
+.badge.PENDING { background: #fff0c4; color: var(--warn); }
+.badge.APPROVED { background: #ddf7ed; color: var(--ok); }
 .row-actions { display: flex; gap: 6px; }
 .row-check {
   width: 18px;
@@ -470,6 +549,25 @@ details.panel summary {
   padding: 7px 11px;
   font-size: 13px;
   font-weight: 600;
+}
+.brand-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.brand-preview img {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 5px;
+  flex: 0 0 auto;
 }
 .settings-grid {
   display: grid;
