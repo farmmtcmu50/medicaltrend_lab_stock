@@ -2,6 +2,7 @@ const state = {
   user: null,
   items: [],
   dashboard: [],
+  dashboardCardFilter: "all",
   stock: [],
   reprintStock: [],
   lotOptions: [],
@@ -72,6 +73,15 @@ function bindUi() {
   $("#dashboardSearch").addEventListener("keydown", enter(refreshDashboard));
   $("#dashboardMachineFilter").addEventListener("change", refreshDashboard);
   $("#refreshDashboardBtn").addEventListener("click", refreshDashboard);
+  $$(".dashboard-filter-card").forEach((card) => {
+    card.addEventListener("click", () => setDashboardCardFilter(card.dataset.dashboardFilter));
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setDashboardCardFilter(card.dataset.dashboardFilter);
+      }
+    });
+  });
   $("#itemSearchBtn").addEventListener("click", refreshItems);
   $("#itemSearch").addEventListener("keydown", enter(refreshItems));
   $("#itemMachineFilter").addEventListener("change", refreshItems);
@@ -200,19 +210,47 @@ async function refreshDashboard() {
   renderMachineFilter($("#dashboardMachineFilter"), res.machines || [], selectedMachine);
   $("#sumExpiringItems").textContent = res.rows.filter((row) => row.status === "EXPIRING").length;
   $("#sumExpiredItems").textContent = res.rows.filter((row) => row.status === "EXPIRED").length;
+  $("#sumCriticalItems").textContent = res.rows.filter((row) => row.status === "CRITICAL").length;
   if (canViewPrices()) {
     $("#sumValue").textContent = money(res.total_value);
     $("#sumAgingValue").textContent = money(res.rows
       .filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status))
       .reduce((sum, row) => sum + Number(row.stock_value || 0), 0));
   }
+  renderDashboardCardFilterState();
   renderDashboardColumns();
-  renderTable($("#dashboardTable"), dashboardVisibleColumns(), res.rows, {
+  renderDashboardTable();
+  renderPrSuggestions();
+}
+
+function setDashboardCardFilter(filter) {
+  const next = filter || "all";
+  state.dashboardCardFilter = state.dashboardCardFilter === next && next !== "all" ? "all" : next;
+  renderDashboardCardFilterState();
+  renderDashboardTable();
+}
+
+function renderDashboardCardFilterState() {
+  $$(".dashboard-filter-card").forEach((card) => {
+    const filter = card.dataset.dashboardFilter || "all";
+    card.classList.toggle("active", filter === state.dashboardCardFilter);
+  });
+}
+
+function filteredDashboardRows() {
+  if (state.dashboardCardFilter === "expiring") return state.dashboard.filter((row) => row.status === "EXPIRING");
+  if (state.dashboardCardFilter === "expired") return state.dashboard.filter((row) => row.status === "EXPIRED");
+  if (state.dashboardCardFilter === "critical") return state.dashboard.filter((row) => row.status === "CRITICAL");
+  if (state.dashboardCardFilter === "aging") return state.dashboard.filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status));
+  return state.dashboard;
+}
+
+function renderDashboardTable() {
+  renderTable($("#dashboardTable"), dashboardVisibleColumns(), filteredDashboardRows(), {
     status: (v) => `<span class="badge ${v}">${v}</span>`,
     unit_price: money, main_unit_price: money, stock_value: money,
   }, (row) => row.status);
   applyDashboardColumnVisibility();
-  renderPrSuggestions();
 }
 
 function renderDashboardColumns() {
