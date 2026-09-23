@@ -211,6 +211,7 @@ async function refreshDashboard() {
   $("#sumExpiringItems").textContent = res.rows.filter((row) => row.status === "EXPIRING").length;
   $("#sumExpiredItems").textContent = res.rows.filter((row) => row.status === "EXPIRED").length;
   $("#sumCriticalItems").textContent = res.rows.filter((row) => row.status === "CRITICAL").length;
+  $("#sumReorderItems").textContent = res.rows.filter((row) => row.status === "REORDER").length;
   if (canViewPrices()) {
     $("#sumValue").textContent = money(res.total_value);
     $("#sumAgingValue").textContent = money(res.rows
@@ -241,6 +242,7 @@ function filteredDashboardRows() {
   if (state.dashboardCardFilter === "expiring") return state.dashboard.filter((row) => row.status === "EXPIRING");
   if (state.dashboardCardFilter === "expired") return state.dashboard.filter((row) => row.status === "EXPIRED");
   if (state.dashboardCardFilter === "critical") return state.dashboard.filter((row) => row.status === "CRITICAL");
+  if (state.dashboardCardFilter === "reorder") return state.dashboard.filter((row) => row.status === "REORDER");
   if (state.dashboardCardFilter === "aging") return state.dashboard.filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status));
   return state.dashboard;
 }
