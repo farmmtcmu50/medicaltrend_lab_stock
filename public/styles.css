@@ -350,7 +350,9 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 }
 .summary-grid article {
   position: relative;
-  min-height: 104px;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -394,7 +396,8 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 }
 .summary-grid strong {
   display: block;
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 12px;
   font-size: 30px;
   line-height: 1;
 }
