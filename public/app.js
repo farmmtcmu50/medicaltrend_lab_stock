@@ -551,6 +551,7 @@ function suggestedPrRows() {
   return state.dashboard.filter((row) => {
     const expiring = ["EXPIRING", "EXPIRED"].includes(row.status);
     const reorder = ["REORDER", "CRITICAL"].includes(row.status);
+    if (source === "reorder_point") return row.status === "REORDER";
     if (source === "reorder") return reorder;
     if (source === "all") return expiring || reorder;
     return expiring;
