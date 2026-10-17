@@ -1,0 +1,33 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "medical-trend-subscriptions",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "CONTROL_DB",
+      "database_name": "medical-trend-subscriptions",
+      "database_id": "6cf3bacf-2240-47cb-82c9-71542f4a876f",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "ADMIN_EMAIL": "chanat@medicaltrend.co.th"
+  },
+  "routes": [
+    {
+      "pattern": "subscriptions.medicaltrend.stream",
+      "custom_domain": true
+    }
+  ]
+}

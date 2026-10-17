@@ -20,6 +20,7 @@ const state = {
   lastLabels: [],
   consumeScanTimer: null,
   consumeScanBusy: false,
+  stockViewsDirty: new Set(),
 };
 
 const dashboardColumns = [
@@ -157,6 +158,19 @@ function switchTab(tab) {
   });
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
+  if (state.stockViewsDirty.has(tab)) {
+    const refreshers = {
+      dashboard: refreshDashboard,
+      pr: refreshDashboard,
+      reprint: refreshReprintStock,
+      reports: refreshReport,
+      settings: async () => { await refreshSettings(); await refreshAuditMaybe(); },
+    };
+    if (refreshers[tab]) {
+      state.stockViewsDirty.delete(tab);
+      refreshers[tab]().catch((error) => { state.stockViewsDirty.add(tab); toast(error.message, true); });
+    }
+  }
   if (tab === "consume") setTimeout(() => $("#consumeForm").barcode.focus(), 0);
 }
 
@@ -176,6 +190,20 @@ async function refreshAll() {
 
 async function refreshSettings() {
   const res = await api("/api/settings");
+  if (res.subscription) {
+    let banner = document.getElementById('subscriptionBanner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'subscriptionBanner';
+      banner.className = 'panel';
+      banner.setAttribute('role', 'status');
+      document.querySelector('.content').prepend(banner);
+    }
+    const end = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(new Date(res.subscription.expires_at));
+    banner.textContent = res.subscription.status === 'expired'
+      ? `Subscription หมดอายุเมื่อ ${end} — ดูและส่งออกข้อมูลได้ กรุณาติดต่อผู้ให้บริการเพื่อต่ออายุ`
+      : `${res.subscription.name} · ${res.subscription.status === 'trial' ? 'ทดลองใช้' : 'Subscription'} ถึง ${end}`;
+  }
   state.branding = {
     lab_name: res.branding?.lab_name || "Medical Trend",
     logo_data_url: res.branding?.logo_data_url || "/logo-medical-trend.png",
@@ -389,10 +417,14 @@ async function refreshStock() {
   const q = encodeURIComponent($("#stockSearch").value.trim());
   const res = await api(`/api/stock/available?q=${q}`);
   state.stock = res.rows;
+  renderStock();
+}
+
+function renderStock() {
   renderTable($("#stockTable"), [
     ["barcode", "QR code"], ["reagent_name", "ชื่อ"], ["lot", "Lot"], ["expiry_date", "Expire"],
     ["quantity_sub", "จำนวนย่อย"], ["sub_unit", "หน่วย"], ["received_at", "รับเมื่อ"], ["actions", "ตัดออก"],
-  ], res.rows.map((row) => ({ ...row, actions: row.barcode })), {
+  ], state.stock.map((row) => ({ ...row, actions: row.barcode })), {
     actions: (_, row) => `<button data-manual-consume="${row.barcode}">ตัด Manual</button>`,
   });
   $$("[data-manual-consume]").forEach((btn) => btn.addEventListener("click", () => manualConsume(btn.dataset.manualConsume)));
@@ -1135,8 +1167,15 @@ async function consume(data, options = {}) {
       if (!ok) return;
       data.confirm_fefo = true;
     }
-    await api("/api/consume", { method: "POST", body: data });
-    await Promise.all([refreshDashboard(), refreshStock(), refreshAuditMaybe()]);
+    const result = await api("/api/consume", { method: "POST", body: data });
+    // Keep the scanner responsive without reading the whole inventory after every scan.
+    state.stock = state.stock.flatMap((row) => {
+      if (row.barcode !== result.barcode && row.barcode !== result.parent_barcode) return [row];
+      const remaining = result.remaining_sub;
+      return remaining > 0 ? [{ ...row, quantity_sub: remaining }] : [];
+    });
+    ["dashboard", "pr", "reprint", "reports", "settings"].forEach((tab) => state.stockViewsDirty.add(tab));
+    renderStock();
     toast(options.scanned ? `ตัด Stock แล้ว: ${preview.target.reagent_name}` : "ตัด Stock แล้ว");
   } catch (error) {
     toast(error.message, true);

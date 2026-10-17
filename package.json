@@ -11,7 +11,14 @@
     "db:migrate:remote": "wrangler d1 migrations apply medical-trend-lab-stock --remote",
     "db:seed:local": "wrangler d1 execute medical-trend-lab-stock --local --file=./seed.sql",
     "db:seed:remote": "wrangler d1 execute medical-trend-lab-stock --remote --file=./seed.sql",
-    "check": "wrangler deploy --dry-run"
+    "check": "wrangler deploy --dry-run",
+    "subscription:setup": "node scripts/subscription.mjs init",
+    "subscription:dev": "wrangler dev --config subscription/wrangler.jsonc --port 8790 --ip 127.0.0.1",
+    "subscription:check": "wrangler deploy --config subscription/wrangler.jsonc --dry-run",
+    "subscription:provision": "node scripts/subscription.mjs provision",
+    "subscription:update": "node scripts/subscription.mjs update",
+    "subscription:backup": "node scripts/subscription.mjs backup",
+    "test:subscription": "node --test tests/subscription.test.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

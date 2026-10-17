@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { subscriptionGate, tenantSetup } from "./subscription.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const COOKIE_MAX_AGE = 60 * 60 * 12;
@@ -9,6 +10,17 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      const subscription = await subscriptionGate(request, env);
+      if (subscription) env = { ...env, SUBSCRIPTION_INFO: subscription };
+      if (env.TENANT_ID && url.pathname.startsWith('/api/') && !['GET','HEAD','OPTIONS'].includes(request.method) && request.headers.get('origin') !== url.origin) {
+        throw httpError('Origin ไม่ถูกต้อง', 403);
+      }
+      if (url.pathname === '/api/tenant/setup') return await tenantSetup(request, env);
+      if (url.pathname === '/api/subscription' && env.TENANT_ID) {
+        if (request.method !== 'GET') throw httpError('Method not allowed', 405);
+        await requireUser(request, env);
+        return json({ ok: true, subscription });
+      }
       await ensureBootstrap(env);
       if (url.pathname.startsWith("/api/")) {
         return await api(request, env);
@@ -80,6 +92,7 @@ async function ensureBootstrap(env) {
   if (!setting) {
     await env.DB.prepare("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES ('expiring_days', '90', ?)").bind(now()).run();
   }
+  if (env.TENANT_ID) return; // New customers set their own password using a one-time setup link.
   const userCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE is_active = 1").first();
   const admin = await env.DB.prepare("SELECT * FROM users WHERE lower(username) = 'admin'").first();
   if (!userCount?.n || !admin || admin.password_hash === "AUTO_CREATE_ON_FIRST_LOGIN") {
@@ -102,7 +115,7 @@ async function login(request, env) {
     return json({ ok: false, error: "username หรือ password ไม่ถูกต้อง" }, 401);
   }
   await logAudit(env, user.username, "LOGIN_SUCCESS", "user", user.username);
-  const token = await signSession(env, { user_id: user.user_id, username: user.username, role: user.role, exp: unixNow() + COOKIE_MAX_AGE });
+  const token = await signSession(env, { user_id: user.user_id, username: user.username, role: user.role, tenant_id: env.TENANT_ID || null, exp: unixNow() + COOKIE_MAX_AGE });
   return json({ ok: true, user: publicUser(user) }, 200, { "set-cookie": cookie(env, token, request) });
 }
 
@@ -349,9 +362,10 @@ async function consumePreview(request, env) {
 
 async function consumeStock(request, env, user) {
   const body = await readBody(request);
-  const barcode = String(body.barcode || "").trim();
-  if (!barcode) throw httpError("กรุณาระบุ QR code");
-  const target = await findStockTarget(env, barcode);
+  const inputBarcode = String(body.barcode || "").trim();
+  if (!inputBarcode) throw httpError("กรุณาระบุ QR code");
+  const target = await findStockTarget(env, inputBarcode);
+  const barcode = target.barcode;
   const requestedQty = target.is_package ? int(body.package_quantity, target.quantity_sub) : 1;
   const warnings = await fefoWarnings(env, target, requestedQty);
   if (warnings.length && !body.confirm_fefo) {
@@ -390,7 +404,13 @@ async function consumeStock(request, env, user) {
     ]);
   }
   await logAudit(env, user.username, "CONSUME_STOCK", "stock", barcode, "SUCCESS", { quantity_sub: requestedQty, note });
-  return json({ ok: true, consumed: requestedQty });
+  const parentBarcode = target.is_package ? "" : target.parent_barcode;
+  const remaining = parentBarcode
+    ? await env.DB.prepare("SELECT COUNT(*) AS qty FROM stock_units WHERE parent_barcode = ? AND status = 'IN_STOCK'").bind(parentBarcode).first()
+    : null;
+  return json({ ok: true, consumed: requestedQty, barcode: target.barcode,
+    parent_barcode: parentBarcode || "", remaining_sub: target.is_package
+      ? Number(target.quantity_sub) - requestedQty : Number(remaining?.qty || 0) });
 }
 
 async function movementReport(request, env, user) {
@@ -621,7 +641,7 @@ async function makeLabelHtml(labels) {
 
 async function getSettings(env) {
   const expiringDays = await expiringDaysSetting(env);
-  const labName = await settingValue(env, "lab_name", "Medical Trend");
+  const labName = await settingValue(env, "lab_name", env.TENANT_ID ? env.APP_NAME : "Medical Trend");
   const logoDataUrl = await settingValue(env, "logo_data_url", "");
   const info = await Promise.all([
     count(env, "items", "is_deleted = 0 AND is_active = 1"),
@@ -634,6 +654,7 @@ async function getSettings(env) {
     ok: true,
     expiring_days: expiringDays,
     branding: { lab_name: labName, logo_data_url: logoDataUrl },
+    subscription: env.SUBSCRIPTION_INFO || null,
     info: { items: info[0], stock_units: info[1], packages: info[2], active_users: info[3], audit_logs: info[4] },
   });
 }
@@ -860,6 +881,7 @@ async function requireUser(request, env) {
   const token = readCookie(request, env.SESSION_COOKIE || "mt_stock_session");
   const session = token ? await verifySession(env, token) : null;
   if (!session?.user_id || session.exp < unixNow()) throw httpError("กรุณา login ก่อน", 401);
+  if (env.TENANT_ID && session.tenant_id !== env.TENANT_ID) throw httpError('Session ไม่ตรงกับองค์กร กรุณา login ใหม่', 401);
   const user = await env.DB.prepare("SELECT * FROM users WHERE user_id = ? AND is_active = 1").bind(session.user_id).first();
   if (!user) throw httpError("กรุณา login ก่อน", 401);
   return user;

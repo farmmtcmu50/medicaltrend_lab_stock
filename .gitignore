@@ -4,3 +4,10 @@ node_modules/
 *.log
 __pycache__/
 *.pyc
+.pnpm-store/
+.provisioning/
+subscription/.dev.vars
+subscription/.wrangler/
+work/
+
+.DS_Store
