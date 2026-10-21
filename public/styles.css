@@ -660,3 +660,10 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
   .span-2 { grid-column: span 1; }
   .dialog-head { display: grid; }
 }
+
+/* Item list uses the available viewport instead of a fixed 58vh panel. */
+#items.active { display: flex; flex-direction: column; height: max(360px, calc(100dvh - var(--items-top, 160px) - 22px)); }
+#items > .table-wrap { flex: 1; max-height: none; min-height: 0; border-radius: 0; box-shadow: none; }
+[data-sub-unit-field][hidden] { display: none !important; }
+.unit-toggle input { width: auto; min-height: auto; }
+.unit-toggle small { color: var(--muted); }

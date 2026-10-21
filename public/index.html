@@ -362,10 +362,11 @@
       <label>ชื่อน้ำยา<input name="reagent_name" required></label>
       <label>ใช้กับเครื่อง<input name="machine" value="Manual"></label>
       <label>หน่วยนับหลัก<input name="main_unit" placeholder="Box" required></label>
-      <label>หน่วยนับย่อย<input name="sub_unit" placeholder="Test" required></label>
-      <label>จำนวนย่อยต่อหลัก<input name="sub_per_main" type="number" min="1" value="1" required></label>
+      <label class="span-2 unit-toggle"><span><input type="checkbox" name="has_sub_unit" role="switch"> ใช้หน่วยย่อย</span><small>เปิดเมื่อสินค้ามีหน่วยย่อย เช่น 1 กล่อง = 5 ขวด รายการที่มีประวัติสต๊อกแล้วต้องสร้างรายการใหม่หากต้องการเปลี่ยนหน่วย</small></label>
+      <label data-sub-unit-field>หน่วยนับย่อย<input name="sub_unit" placeholder="Test" required></label>
+      <label data-sub-unit-field>อัตราแปลง: จำนวนหน่วยย่อยต่อ 1 หน่วยหลัก<input name="sub_per_main" type="number" min="1" value="1" required></label>
       <label>Supplier<input name="supplier"></label>
-      <label class="price-only">ราคาต่อหน่วยย่อย<input name="unit_price" type="number" min="0" step="0.01" value="0"></label>
+      <label class="price-only" data-sub-unit-field>ราคาต่อหน่วยย่อย<input name="unit_price" type="number" min="0" step="0.01" value="0"></label>
       <label class="price-only">ราคาต่อหน่วยหลัก<input name="main_unit_price" type="number" min="0" step="0.01" value="0"></label>
       <label>Lead time (วัน)<input name="lead_time_days" type="number" min="0" value="0"></label>
       <label>Safety Stock<input name="reorder_point_sub" type="number" min="0" value="0"></label>

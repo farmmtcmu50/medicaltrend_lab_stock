@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 test('scan updates only the affected row and defers hidden views',async()=>{
  const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace('boot();','');
- const calls=[];const c=vm.createContext({console,setTimeout,clearTimeout,location:{hash:''},document:{querySelector:()=>({barcode:{focus(){}}}),querySelectorAll:()=>[]}});
+ const calls=[];const c=vm.createContext({window:{addEventListener(){}},console,setTimeout,clearTimeout,location:{hash:''},document:{querySelector:()=>({barcode:{focus(){}}}),querySelectorAll:()=>[]}});
  vm.runInContext(source,c);
  c.calls=calls;
  vm.runInContext(`state.stock=[{barcode:'BOX',quantity_sub:5},{barcode:'OTHER',quantity_sub:7}];

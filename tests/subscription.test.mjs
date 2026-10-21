@@ -154,3 +154,24 @@ test('QR query plan avoids a table scan with 10,000 historical rows', async () =
  assert.ok(before.results.some(r=>r.detail.includes('SCAN stock_units')));
  assert.ok(after.results.some(r=>r.detail.includes('idx_su_barcode_lower')));
 });
+
+test('optional sub units preserve single-unit stock, conversion, backups and history',async()=>{
+ const cookie=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ const send=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
+ const base={reagent_name:'Single unit',main_unit:'ขวด',has_sub_unit:0,sub_unit:'ignored',sub_per_main:99,main_unit_price:120};
+ const added=await send('/api/items',base);assert.equal(added.status,200);
+ const id=added.data.item_id;
+ let item=await aDb.prepare('SELECT * FROM items WHERE item_id=?').bind(id).first();
+ assert.equal(item.has_sub_unit,0);assert.equal(item.sub_unit,'ขวด');assert.equal(item.sub_per_main,1);assert.equal(item.unit_price,120);
+ let received=await send('/api/receive',{item_id:id,quantity:3,unit_mode:'main',sticker_mode:'main',lot:'SINGLE',expiry_date:'2028-12-31'});
+ assert.equal(received.status,200);assert.equal(received.data.labels.length,3);assert.ok(received.data.labels.every(l=>l.type==='sub'));
+ let stock=await aDb.prepare("SELECT COUNT(*) AS qty FROM stock_units WHERE item_id=? AND status='IN_STOCK'").bind(id).first();assert.equal(stock.qty,3);
+ const consumed=await send('/api/consume',{barcode:received.data.labels[0].code});assert.equal(consumed.status,200);assert.equal(consumed.data.consumed,1);
+ assert.equal((await send('/api/items/'+id,{...base,reagent_name:'Renamed'},'PUT')).status,200);
+ assert.equal((await send('/api/items/'+id,{...base,has_sub_unit:1,sub_unit:'Test',sub_per_main:10},'PUT')).status,409);
+ const converted=await send('/api/items',{...base,reagent_name:'Converted',has_sub_unit:1,main_unit:'กล่อง',sub_unit:'ขวด',sub_per_main:5,main_unit_price:500});assert.equal(converted.status,200);
+ item=await aDb.prepare('SELECT * FROM items WHERE item_id=?').bind(converted.data.item_id).first();assert.equal(item.unit_price,100);
+ received=await send('/api/receive',{item_id:item.item_id,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'CONVERT',expiry_date:'2028-12-31'});assert.equal(received.status,200);assert.equal(received.data.labels.length,2);assert.equal(received.data.labels[0].sub_count,5);
+ assert.equal((await send('/api/items',{...base,has_sub_unit:1,sub_unit:'ขวด',sub_per_main:1.5})).status,400);
+ const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.equal(backup.data.tables.items.find(i=>i.item_id===id).has_sub_unit,0);
+});

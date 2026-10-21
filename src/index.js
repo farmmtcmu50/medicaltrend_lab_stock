@@ -210,10 +210,10 @@ async function addItem(request, env, user) {
   await env.DB.prepare(
     `INSERT INTO items
      (item_id, reagent_name, machine, main_unit, sub_unit, sub_per_main, supplier, unit_price, main_unit_price,
-      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, is_active, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`
+      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, has_sub_unit, is_active, is_deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`
   ).bind(itemId, data.reagent_name, data.machine, data.main_unit, data.sub_unit, data.sub_per_main, data.supplier,
-    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), now(), user.username, user.username).run();
+    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), now(), user.username, user.username, data.has_sub_unit).run();
   await logAudit(env, user.username, "ADD_ITEM", "item", itemId, "SUCCESS", data);
   return json({ ok: true, item_id: itemId });
 }
@@ -221,16 +221,22 @@ async function addItem(request, env, user) {
 async function updateItem(request, env, user, itemId) {
   const before = await getExistingItem(env, itemId);
   const data = cleanItem(await readBody(request));
+  const unitsChanged = data.main_unit !== before.main_unit || data.sub_unit !== before.sub_unit
+    || data.sub_per_main !== Number(before.sub_per_main) || data.has_sub_unit !== Number(before.has_sub_unit ?? 1);
+  if (unitsChanged) {
+    const history = await env.DB.prepare("SELECT 1 AS found FROM stock_units WHERE item_id = ? LIMIT 1").bind(itemId).first();
+    if (history) throw httpError("รายการนี้มีประวัติสต๊อกแล้ว ไม่สามารถเปลี่ยนหน่วยหรืออัตราแปลงได้ กรุณาสร้างรายการใหม่", 409);
+  }
   if (!canViewPrices(user)) {
     data.unit_price = Number(before.unit_price || 0);
     data.main_unit_price = Number(before.main_unit_price || 0);
   }
   await env.DB.prepare(
     `UPDATE items SET reagent_name = ?, machine = ?, main_unit = ?, sub_unit = ?, sub_per_main = ?, supplier = ?,
-      unit_price = ?, main_unit_price = ?, lead_time_days = ?, reorder_point_sub = ?, updated_at = ?, updated_by = ?
+      unit_price = ?, main_unit_price = ?, lead_time_days = ?, reorder_point_sub = ?, updated_at = ?, updated_by = ?, has_sub_unit = ?
      WHERE item_id = ? AND is_deleted = 0`
   ).bind(data.reagent_name, data.machine, data.main_unit, data.sub_unit, data.sub_per_main, data.supplier,
-    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), user.username, itemId).run();
+    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), user.username, data.has_sub_unit, itemId).run();
   await env.DB.prepare(
     `UPDATE stock_units SET reagent_name = ?, machine = ?, sub_unit = ? WHERE item_id = ? AND status = 'IN_STOCK'`
   ).bind(data.reagent_name, data.machine, data.sub_unit, itemId).run();
@@ -301,8 +307,8 @@ async function receiveStock(request, env, user) {
   const lot = String(body.lot || "").trim();
   const expiry = String(body.expiry_date || "").trim();
   if (!lot || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw httpError("กรุณาระบุ Lot และวันหมดอายุ");
-  const unitMode = body.unit_mode === "main" ? "main" : "sub";
-  const stickerMode = body.sticker_mode === "main" ? "main" : "sub";
+  const unitMode = Number(item.has_sub_unit ?? 1) === 0 ? "main" : body.unit_mode === "main" ? "main" : "sub";
+  const stickerMode = Number(item.has_sub_unit ?? 1) === 0 ? "sub" : body.sticker_mode === "main" ? "main" : "sub";
   const subPerMain = Math.max(1, Number(item.sub_per_main || 1));
   const totalSub = unitMode === "main" ? quantity * subPerMain : quantity;
   const created = [];
@@ -914,16 +920,24 @@ async function getExistingItem(env, itemId) {
 }
 
 function cleanItem(body) {
-  const subPerMain = int(body.sub_per_main, 1);
+  const hasSubUnit = body.has_sub_unit === undefined ? 1 : Number(body.has_sub_unit);
+  if (![0, 1].includes(hasSubUnit)) throw httpError("สถานะหน่วยย่อยไม่ถูกต้อง");
+  const subPerMain = hasSubUnit ? Number(body.sub_per_main ?? 1) : 1;
+  if (!Number.isSafeInteger(subPerMain) || subPerMain < 1) throw httpError("อัตราแปลงต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป");
+  const mainUnit = String(body.main_unit || "").trim();
+  const subUnit = hasSubUnit ? String(body.sub_unit || "").trim() : mainUnit;
+  if (!mainUnit || !subUnit) throw httpError("กรุณาระบุหน่วยนับให้ครบ");
   let unitPrice = money(body.unit_price);
   let mainUnitPrice = money(body.main_unit_price);
+  if (!hasSubUnit) unitPrice = mainUnitPrice;
   if (unitPrice && !mainUnitPrice) mainUnitPrice = round(unitPrice * subPerMain);
   if (mainUnitPrice && !unitPrice) unitPrice = round(mainUnitPrice / subPerMain);
   return {
     reagent_name: String(body.reagent_name || "").trim(),
     machine: String(body.machine || "").trim() || "Manual",
-    main_unit: String(body.main_unit || "").trim(),
-    sub_unit: String(body.sub_unit || "").trim(),
+    has_sub_unit: hasSubUnit,
+    main_unit: mainUnit,
+    sub_unit: subUnit,
     sub_per_main: subPerMain,
     supplier: String(body.supplier || "").trim(),
     unit_price: unitPrice,

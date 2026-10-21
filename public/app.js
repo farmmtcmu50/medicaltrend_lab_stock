@@ -117,6 +117,7 @@ function bindUi() {
 
   const itemForm = $("#itemForm");
   itemForm.addEventListener("submit", saveItem);
+  itemForm.has_sub_unit.addEventListener("change", syncItemUnits);
   itemForm.unit_price.addEventListener("input", () => calcPrice("unit"));
   itemForm.main_unit_price.addEventListener("input", () => calcPrice("main"));
   itemForm.sub_per_main.addEventListener("input", () => calcPrice(itemForm.dataset.lastPrice || "unit"));
@@ -158,6 +159,7 @@ function switchTab(tab) {
   });
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
+  if (tab === "items") resizeItemsTable();
   if (state.stockViewsDirty.has(tab)) {
     const refreshers = {
       dashboard: refreshDashboard,
@@ -340,6 +342,8 @@ async function refreshItems() {
   renderTable($("#itemsTable"), itemVisibleColumns(), state.items.map((item) => ({
     ...item,
     active_label: Number(item.is_active ?? 1) ? "Active" : "Inactive",
+    sub_unit: Number(item.has_sub_unit ?? 1) ? item.sub_unit : "—",
+    sub_per_main: Number(item.has_sub_unit ?? 1) ? item.sub_per_main : "—",
     actions: item.item_id,
   })), {
     active_label: (v) => `<span class="badge ${esc(v.toUpperCase())}">${esc(v)}</span>`,
@@ -408,6 +412,9 @@ async function openReceiveDialog(itemId) {
   form.sticker_mode.value = "sub";
   $("#receiveDialogTitle").textContent = `รับเข้า: ${item.reagent_name}`;
   $("#receiveDialogMeta").textContent = `${item.machine || "-"} | ${item.main_unit || "-"} / ${item.sub_unit || "-"} | Supplier: ${item.supplier || "-"}`;
+  const enabled = Number(item.has_sub_unit ?? 1) === 1;
+  form.unit_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อย</option><option value="main">หน่วยหลัก</option>' : '<option value="main">หน่วยหลัก</option>';
+  form.sticker_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option>' : '<option value="sub">หน่วยหลักแยกดวง</option>';
   await refreshLotOptions();
   $("#receiveDialog").showModal();
   form.quantity.focus();
@@ -965,6 +972,8 @@ async function saveItem(e) {
   e.preventDefault();
   const form = e.target;
   const data = formData(form);
+  data.has_sub_unit = form.has_sub_unit.checked ? 1 : 0;
+  if (!data.has_sub_unit) { data.sub_unit = data.main_unit; data.sub_per_main = 1; data.unit_price = data.main_unit_price; }
   if (data.item_id) {
     await api(`/api/items/${encodeURIComponent(data.item_id)}`, { method: "PUT", body: data });
     toast("บันทึกแก้ไขรายการน้ำยาแล้ว");
@@ -989,6 +998,8 @@ function editItem(id) {
   const form = $("#itemForm");
   Object.entries(item).forEach(([k, v]) => { if (form[k]) form[k].value = v ?? ""; });
   form.item_id.value = id;
+  form.has_sub_unit.checked = Number(item.has_sub_unit ?? 1) === 1;
+  syncItemUnits();
   $("#saveItemBtn").textContent = "บันทึกแก้ไขรายการ";
   $("#itemDialogTitle").textContent = "แก้ไขรายการน้ำยา";
   $("#itemDialog").showModal();
@@ -1023,6 +1034,8 @@ function resetItemForm() {
   $("#itemForm").sub_per_main.value = 1;
   $("#itemForm").unit_price.value = 0;
   $("#itemForm").main_unit_price.value = 0;
+  $("#itemForm").has_sub_unit.checked = false;
+  syncItemUnits();
   $("#saveItemBtn").textContent = "บันทึกรายการ";
   $("#itemDialogTitle").textContent = "เพิ่มน้ำยาใหม่";
 }
@@ -1032,10 +1045,28 @@ function closeItemDialog() {
   $("#itemDialog").close();
 }
 
+function resizeItemsTable() {
+  const items = $("#items");
+  if (items?.classList.contains("active")) items.style.setProperty("--items-top", `${items.getBoundingClientRect().top}px`);
+}
+window.addEventListener("resize", resizeItemsTable);
+
+function syncItemUnits() {
+  const form = $("#itemForm");
+  const enabled = form.has_sub_unit.checked;
+  $$('[data-sub-unit-field]', form).forEach((label) => { label.hidden = !enabled; });
+  form.sub_unit.disabled = !enabled;
+  form.sub_per_main.disabled = !enabled;
+  form.unit_price.disabled = !enabled;
+  form.sub_unit.required = enabled;
+  form.sub_per_main.required = enabled;
+  if (!enabled) { form.sub_per_main.value = 1; form.unit_price.value = form.main_unit_price.value; }
+}
+
 function calcPrice(mode) {
   const form = $("#itemForm");
   form.dataset.lastPrice = mode;
-  const factor = Math.max(1, Number(form.sub_per_main.value || 1));
+  const factor = form.has_sub_unit.checked ? Math.max(1, Number(form.sub_per_main.value || 1)) : 1;
   if (mode === "unit") {
     form.main_unit_price.value = (Number(form.unit_price.value || 0) * factor).toFixed(2);
   } else {
