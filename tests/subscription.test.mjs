@@ -276,3 +276,21 @@ test('concurrent count approval commits once, unchanged counts are reversible an
  assert.equal((await wfPost('/api/operations/'+confirmed.data.operation_id+'/reverse',{reason:'ยืนยันผิดใบตรวจนับ'})).status,200);
  assert.equal((await wfPost('/api/receive',{item_id:workflowItem,quantity:1,lot:'INVALID',expiry_date:'2030-13-01'})).status,400);
 });
+
+test('dashboard aggregates analytics, enforces delivery date permissions and preserves terms in backup',async()=>{
+ const cookie=await wfAuth(),today=new Date().toISOString().slice(0,10);
+ const pr=(await aDb.prepare('SELECT pr_id FROM purchase_requisitions WHERE status=? LIMIT 1').bind('APPROVED').first()).pr_id;
+ const save=await tenantRequest('tenant-a','/api/dashboard/delivery',{method:'PUT',cookie,body:{pr_id:pr,issued_date:today,expected_date:today}});assert.equal(save.status,200,JSON.stringify(save.data));
+ const dashboard=await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie});assert.equal(dashboard.status,200,JSON.stringify(dashboard.data));assert.equal(dashboard.data.analytics.range.days,1);assert.ok(Array.isArray(dashboard.data.analytics.inventory));assert.ok(dashboard.data.analytics.deliveries.some(r=>r.pr_id===pr&&r.eligible));
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const publicData=await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie:staff});assert.equal(publicData.data.analytics.inventory,null);
+ assert.equal((await tenantRequest('tenant-a','/api/dashboard/delivery',{method:'PUT',cookie:staff,body:{pr_id:pr,issued_date:today,expected_date:today}})).status,403);
+ assert.equal((await tenantRequest('tenant-a','/api/dashboard?period=custom&start=2026-02-30&end=2026-03-01',{cookie})).status,400);
+ const budget=await tenantRequest('tenant-a','/api/dashboard/purchase-total',{method:'PUT',cookie,body:{start:today,end:today,total_value:5000}});assert.equal(budget.status,200);
+ assert.equal((await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie})).data.analytics.purchase_total,5000);
+ assert.equal((await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie:staff})).data.analytics.purchase_total,null);
+ assert.equal((await tenantRequest('tenant-a','/api/dashboard/purchase-total',{method:'PUT',cookie:staff,body:{start:today,end:today,total_value:5000}})).status,403);
+ const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.pr_delivery_terms.some(r=>r.pr_id===pr));assert.equal(backup.data.tables.analytics_purchase_totals[0].total_value,5000);
+ assert.equal((await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:backup.data})).status,200);
+ assert.equal((await aDb.prepare('SELECT issued_date FROM pr_delivery_terms WHERE pr_id=?').bind(pr).first()).issued_date,today);
+});

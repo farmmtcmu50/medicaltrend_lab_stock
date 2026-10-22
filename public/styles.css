@@ -679,3 +679,25 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
   .sidebar nav { flex: 1; min-height: 0; overflow-y: auto; align-content: start; }
   .sidebar .brand, .sidebar #logoutBtn, .sidebar .sidebar-footer { flex-shrink: 0; }
 }
+
+.analytics-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:18px 0; }
+.analytics-card { background:#fff; border:1px solid #e0e7ef; border-radius:18px; padding:22px; cursor:pointer; min-width:0; box-shadow:0 4px 18px #152b4610; }
+.analytics-card:hover,.analytics-card:focus-visible { border-color:#3b82f6; outline:2px solid #93c5fd; }
+.analytics-card h3 { margin:0 0 6px; font-size:17px; }
+.analytics-card p { color:#64748b; font-size:12px; }
+.analytics-card .metric { font-size:38px; font-weight:800; color:#163653; display:block; margin:14px 0; }
+.pie-layout { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+.analytics-pie { width:150px; height:150px; border-radius:50%; display:grid; place-items:center; flex-shrink:0; }
+.analytics-pie span { background:white; border-radius:50%; width:108px; height:108px; display:grid; place-items:center; font-size:27px; font-weight:800; }
+.analytics-bar { display:grid; grid-template-columns:minmax(80px,1fr) 2fr 65px; gap:10px; align-items:center; margin:12px 0; font-size:12px; }
+.analytics-track { background:#eef2f7; border-radius:5px; height:20px; overflow:hidden; display:flex; }
+.analytics-track i { display:block; height:100%; background:#3b82f6; }
+.analytics-heat { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+.analytics-heat span { padding:12px 8px; border-radius:8px; font-size:12px; text-align:center; }
+.analytics-dialog { width:min(1200px,95vw); max-height:90vh; border:0; border-radius:18px; padding:24px; }
+.analytics-close { float:right; }
+.analytics-trend { width:100%; height:120px; }
+@media(max-width:800px) { .analytics-grid {grid-template-columns:1fr;} .analytics-card {padding:16px;} }
+.analytics-heat {grid-template-columns:minmax(70px,1fr) repeat(3,minmax(0,1fr));}
+.analytics-heat span {overflow-wrap:anywhere;}
+@media(max-width:800px) { #dashboard .summary-grid {grid-template-columns:repeat(2,minmax(0,1fr));} #dashboard .summary-grid article {min-width:0; padding:16px;} #dashboard .summary-grid strong {font-size:26px;} }

@@ -76,6 +76,13 @@ function bindUi() {
   $("#dashboardSearch").addEventListener("keydown", enter(refreshDashboard));
   $("#dashboardMachineFilter").addEventListener("change", refreshDashboard);
   $("#refreshDashboardBtn").addEventListener("click", refreshDashboard);
+  $('#dashboardPeriod').addEventListener('change',()=>{const custom=$('#dashboardPeriod').value==='custom';$('#dashboardStartLabel').hidden=!custom;$('#dashboardEndLabel').hidden=!custom;if(!custom||($('#dashboardStart').value&&$('#dashboardEnd').value))refreshDashboard().catch(e=>toast(e.message,true));});
+  for(const id of ['dashboardStart','dashboardEnd'])$('#'+id).addEventListener('change',()=>{if($('#dashboardStart').value&&$('#dashboardEnd').value)refreshDashboard().catch(e=>toast(e.message,true));});
+  $('#setPurchaseTotalBtn').addEventListener('click',()=>{const a=state.analytics;if(!a)return;$('#purchaseTotalPeriod').textContent=`${a.range.start} ถึง ${a.range.end}`;$('#purchaseTotalForm').total_value.value=a.purchase_total??'';$('#purchaseTotalDialog').showModal();});
+  $('#closePurchaseTotal').addEventListener('click',()=>$('#purchaseTotalDialog').close());
+  $('#purchaseTotalForm').addEventListener('submit',async event=>{event.preventDefault();try{const a=state.analytics;await api('/api/dashboard/purchase-total',{method:'PUT',body:{start:a.range.start,end:a.range.end,total_value:Number(event.target.total_value.value)}});$('#purchaseTotalDialog').close();await refreshDashboard();toast('บันทึกมูลค่าซื้อแล้ว');}catch(e){toast(e.message,true);}});
+  $('#closeDeliveryTerms').addEventListener('click',()=>$('#deliveryTermsDialog').close());
+  $('#deliveryTermsForm').addEventListener('submit',async event=>{event.preventDefault();try{await api('/api/dashboard/delivery',{method:'PUT',body:formData(event.target)});$('#deliveryTermsDialog').close();$('#analyticsDetailsDialog').close();await refreshDashboard();toast('บันทึกวันจัดซื้อแล้ว');}catch(e){toast(e.message,true);}});
   $$(".dashboard-filter-card").forEach((card) => {
     card.addEventListener("click", () => setDashboardCardFilter(card.dataset.dashboardFilter));
     card.addEventListener("keydown", (e) => {
@@ -240,13 +247,16 @@ async function refreshDashboard() {
   const q = encodeURIComponent($("#dashboardSearch").value.trim());
   const selectedMachine = $("#dashboardMachineFilter").value.trim();
   const machine = encodeURIComponent(selectedMachine);
-  const res = await api(`/api/dashboard?q=${q}&machine=${machine}`);
+  const dates=new URLSearchParams({period:$('#dashboardPeriod').value,start:$('#dashboardStart').value,end:$('#dashboardEnd').value});
+  const res = await api(`/api/dashboard?q=${q}&machine=${machine}&${dates}`);
+  state.analytics=res.analytics;
   state.dashboard = res.rows;
+  renderAnalytics();
   renderMachineFilter($("#dashboardMachineFilter"), res.machines || [], selectedMachine);
   $("#sumExpiringItems").textContent = res.rows.filter((row) => row.status === "EXPIRING").length;
   $("#sumExpiredItems").textContent = res.rows.filter((row) => row.status === "EXPIRED").length;
   $("#sumCriticalItems").textContent = res.rows.filter((row) => row.status === "CRITICAL").length;
-  $("#sumReorderItems").textContent = res.rows.filter((row) => row.status === "REORDER").length;
+  $("#sumReorderItems").textContent = res.rows.filter((row) => Number(row.qty_sub) <= Number(row.reorder_point_sub)).length;
   if (canViewPrices()) {
     $("#sumValue").textContent = money(res.total_value);
     $("#sumAgingValue").textContent = money(res.rows
@@ -264,6 +274,7 @@ function setDashboardCardFilter(filter) {
   state.dashboardCardFilter = state.dashboardCardFilter === next && next !== "all" ? "all" : next;
   renderDashboardCardFilterState();
   renderDashboardTable();
+  if(!$("#dashboardStockDialog").open)$("#dashboardStockDialog").showModal();
 }
 
 function renderDashboardCardFilterState() {
@@ -277,7 +288,7 @@ function filteredDashboardRows() {
   if (state.dashboardCardFilter === "expiring") return state.dashboard.filter((row) => row.status === "EXPIRING");
   if (state.dashboardCardFilter === "expired") return state.dashboard.filter((row) => row.status === "EXPIRED");
   if (state.dashboardCardFilter === "critical") return state.dashboard.filter((row) => row.status === "CRITICAL");
-  if (state.dashboardCardFilter === "reorder") return state.dashboard.filter((row) => row.status === "REORDER");
+  if (state.dashboardCardFilter === "reorder") return state.dashboard.filter((row) => Number(row.qty_sub) <= Number(row.reorder_point_sub));
   if (state.dashboardCardFilter === "aging") return state.dashboard.filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status));
   return state.dashboard;
 }
@@ -1705,4 +1716,56 @@ async function openPrReceiving(prId){
   try{$('#prReceivingDialog').close();await openReceiveDialog(itemId);$('#receiveForm').pr_line_id.value=line.line_id;updateReceiptHint();}catch(error){toast(error.message,true);}
  }));
  $('#prReceiptItem').innerHTML='<option value="">เลือกสินค้าเมื่อบรรทัด PR เพิ่มเอง</option>'+state.items.map(i=>`<option value="${esc(i.item_id)}">${esc(i.reagent_name)}</option>`).join('');
+}
+
+function renderAnalytics(){
+ const a=state.analytics,rows=state.dashboard||[];
+ if(!a)return;
+ const all=rows.length,empty=rows.filter(r=>Number(r.qty_sub)<=0).length,rop=rows.filter(r=>Number(r.qty_sub)<=Number(r.reorder_point_sub)).length;
+ const pct=(n,d)=>d>0?(n/d*100).toFixed(1)+'%':'ไม่มีข้อมูล';
+ const pie=(n,d,color)=>`<div class="pie-layout"><div class="analytics-pie" style="background:conic-gradient(${color} 0 ${d?n/d*100:0}%,#e7edf5 0 100%)"><span>${pct(n,d)}</span></div><div><strong>${n} / ${d} รายการ</strong><p>นับเฉพาะรายการที่เปิดใช้งาน</p></div></div>`;
+ const card=(key,title,sub,content,price=false)=>`<article class="analytics-card${price?' price-only':''}" tabindex="0" role="button" data-analytic="${key}"><h3>${title}</h3><p>${sub}</p>${content}</article>`;
+ const sum=(list,key)=>list.reduce((s,r)=>s+Number(r[key]||0),0);
+ const inventory=a.inventory||[],groups=new Map();for(const row of inventory){if(!groups.has(row.machine))groups.set(row.machine,[]);groups.get(row.machine).push(row);}
+ const machines=[...groups].map(([name,list])=>{const average=sum(list,'average_value'),used=sum(list,'used_value');return {name,average,used,value:average>0?used/average:null};});
+ const bars=(list,suffix='',color='#3b82f6',scale=null)=>{const max=scale||Math.max(...list.map(r=>r.value||0),1);return list.length?list.map(r=>`<div class="analytics-bar"><span>${esc(r.name)}</span><div class="analytics-track"><i style="width:${Math.max(0,Math.min(100,(r.value||0)/max*100))}%;background:${color}"></i></div><b>${r.value===null?'—':Number(r.value).toFixed(2)+suffix}</b></div>`).join(''):'<p>ยังไม่มีข้อมูล</p>';};
+ const used=sum(inventory,'used_value'),closing=sum(inventory,'closing_value'),waste=sum(inventory,'wasted_value'),received=sum(inventory,'received_value');
+ const due=a.deliveries.filter(d=>d.eligible),vendors=[...new Set(due.map(d=>d.vendor))].map(name=>{const list=due.filter(d=>d.vendor===name);return {name,value:100*list.filter(d=>d.on_time).length/list.length};});
+ const leads=a.deliveries.filter(d=>d.complete&&d.issued_date&&d.received_date>=a.range.start&&d.received_date<=a.range.end&&d.lead_days>=0);
+ const nearBuckets=['หมดอายุ','<30 วัน','30–59 วัน','60–89 วัน'],colors=['#be123c','#ef4444','#f59e0b','#3b82f6'];
+ const reasons=['หมดอายุ','เสื่อมสภาพ / เสียหาย','อื่น ๆ'];
+ const heatRows=[...groups].map(([name,list])=>({name,values:reasons.map(reason=>list.reduce((s,r)=>s+(r.reasons[reason]||0),0))}));
+ const maxWaste=Math.max(...heatRows.flatMap(r=>r.values),1);
+ const heat=`<span>เครื่อง / สาเหตุ</span>${reasons.map(r=>`<span>${esc(r)}</span>`).join('')}`+heatRows.map(r=>`<span>${esc(r.name)}</span>${r.values.map(v=>`<span style="background:rgba(239,68,68,${.08+.6*Math.min(1,Math.max(0,v)/maxWaste)})"><b>${money(v)}</b></span>`).join('')}`).join('');
+ const nearMachines=[...new Set(a.near.map(r=>r.machine||'ไม่ระบุเครื่อง'))];
+ const maxLots=Math.max(...nearMachines.map(machine=>a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine).length),1);
+ const stacked=nearMachines.map(machine=>{const list=a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine);return `<div class="analytics-bar"><span>${esc(machine)}</span><div class="analytics-track">${nearBuckets.map((bucket,index)=>{const count=list.filter(r=>r.bucket===bucket).length;return `<i title="${esc(bucket)}: ${count} Lot" style="width:${count/maxLots*100}%;background:${colors[index]}"></i>`;}).join('')}</div><b>${list.length} Lot</b></div>`;}).join('')||'<p>ไม่มี Lot ที่หมดอายุหรือใกล้หมดอายุภายใน 90 วัน</p>';
+ const legend=nearBuckets.map((bucket,index)=>`<span style="color:${colors[index]}">● ${esc(bucket)}</span>`).join(' · ');
+ const trendGroups=new Map();for(const l of leads){const month=l.received_date.slice(0,7);if(!trendGroups.has(month))trendGroups.set(month,[]);trendGroups.get(month).push(l.lead_days);}
+ const trend=[...trendGroups].sort().map(([name,v])=>({name,value:v.reduce((s,n)=>s+n,0)/v.length})),maxLead=Math.max(...trend.map(r=>r.value),1);
+ const points=trend.map((r,i)=>`${trend.length===1?150:20+i*260/(trend.length-1)},${95-r.value/maxLead*75}`).join(' ');
+ const line=trend.length?`<svg class="analytics-trend" viewBox="0 0 300 120" role="img" aria-label="แนวโน้ม Lead Time รายเดือน"><polyline points="${points}" fill="none" stroke="#2563eb" stroke-width="3"/>${trend.map((r,i)=>{const x=trend.length===1?150:20+i*260/(trend.length-1),y=95-r.value/maxLead*75;return `<circle cx="${x}" cy="${y}" r="4" fill="#2563eb"/><text x="${x}" y="115" text-anchor="middle" font-size="9">${esc(r.name)}</text><text x="${x}" y="${y-8}" text-anchor="middle" font-size="10">${r.value.toFixed(1)}</text>`;}).join('')}</svg>`:'<p>ยังไม่มีรายการรับครบที่ระบุวันออก PO</p>';
+ $('#analyticsPeriodNote').textContent=`ช่วงวิเคราะห์ ${a.range.start} ถึง ${a.range.end} (${a.range.days} วัน) • กรองตามเครื่องและคำค้นด้านบน`;
+ $('#dashboardCharts').innerHTML=
+ card('stockout','Stockout Rate','อัตรารายการน้ำยาหมดสต๊อก ณ ปัจจุบัน',pie(empty,all,'#ef4444'))+
+ card('reorder','Reorder Point Trigger','คงเหลือ ≤ ROP รวมรายการที่หมดสต๊อก',pie(rop,all,'#f59e0b'))+
+ (a.inventory?card('turnover','Inventory Turnover Ratio','มูลค่าใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย · แยกตามเครื่อง',bars(machines,' เท่า'),true)+
+ card('doh','Days On Hand','มูลค่าปลายงวด ÷ มูลค่าใช้งานเฉลี่ยต่อวัน',`<strong class="metric">${used>0?(closing/(used/a.range.days)).toFixed(1)+' วัน':'คำนวณไม่ได้'}</strong><p>อ้างอิงการใช้ ${a.range.days} วัน • เป้าหมายตัวอย่าง 30–45 วัน ปรับตาม Lead Time</p>`,true)+
+ card('wastage','Wastage Rate','มูลค่าตัดทิ้งสุทธิ ÷ มูลค่าการสั่งซื้อในงบประมาณ',`<strong class="metric">${a.purchase_total===null?'รอระบุมูลค่าซื้อ':pct(waste,a.purchase_total)}</strong><p>เป้าหมาย &lt;1–2% • ฐานซื้อทั้งคลัง ${a.purchase_total===null?'ยังไม่ระบุ':money(a.purchase_total)+' บาท'} • มูลค่าตัดทิ้งตามตัวกรอง</p><div class="analytics-heat">${heat}</div><p>กำหนดฐานที่ปุ่ม “มูลค่าซื้อในงบประมาณ” • ยอดรับเข้าในช่วงนี้ ${money(received)} บาท</p>`,true):'')+
+ card('near','Near-Expiry Alerts','FEFO · จำนวน Lot / รายการ แยกกลุ่มวันแบบไม่ซ้ำกัน',stacked+`<p>${legend}</p>`+'<p>คลิกเพื่อดูจำนวนคงเหลือแยกน้ำยา / Lot / หน่วย</p>')+
+ card('otif','On-Time In-Full','สัดส่วนเอกสารที่รับครบภายในวันนัดส่ง · แยก Vendor',bars(vendors,'%', '#10b981',100)+`<p>ฐาน ${due.length} คู่เอกสาร/Vendor ที่ออกในช่วงและถึงวันนัดส่งแล้ว • ไม่รวมเอกสารที่ยังไม่ได้ระบุวันที่</p>`)+
+ card('lead','Average Lead Time','วันรับครบจริง − วันออก PO · เฉลี่ยต่อเอกสาร/Vendor',`<strong class="metric">${leads.length?(sum(leads,'lead_days')/leads.length).toFixed(1)+' วัน':'ไม่มีข้อมูล'}</strong>${line}<p>จัดกลุ่มแนวโน้มตามเดือนที่รับครบ • คลิกเพื่อบันทึกวันออก PO / นัดส่ง</p>`);
+ $$('[data-analytic]').forEach(el=>{el.addEventListener('click',()=>openAnalyticsDetails(el.dataset.analytic));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openAnalyticsDetails(el.dataset.analytic);}});});
+}
+function openAnalyticsDetails(key){
+ if(key==='stockout'||key==='reorder'){state.dashboardCardFilter=key==='stockout'?'critical':'reorder';renderDashboardCardFilterState();renderDashboardTable();$('#dashboardStockDialog').showModal();return;}
+ const a=state.analytics;let rows,columns,title;
+ if(key==='near'){title='น้ำยาใกล้หมดอายุ / หมดอายุ เรียงตาม FEFO';rows=a.near;columns=[['name','น้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['days','วันคงเหลือ'],['bucket','กลุ่ม'],['quantity','จำนวน'],['unit','หน่วย']];}
+ else if(key==='otif'||key==='lead'){
+  title='การส่งมอบและระยะเวลารอของ — เอกสารที่อนุมัติ';rows=a.deliveries.map(d=>({...d,complete:d.complete?'รับครบ':'ยังไม่ครบ',on_time:d.eligible?(d.on_time?'ตรงเวลาและครบ':'ไม่ผ่าน'):'ยังไม่เข้าเกณฑ์ / วันที่ไม่ครบ',lead_days:d.lead_days??'—',actions:state.user.role==='admin'?`<button data-delivery="${esc(d.pr_id)}">กำหนดวันที่</button>`:''}));
+  columns=[['pr_no','เอกสาร PR ที่อ้างอิง PO'],['vendor','Vendor'],['issued_date','ออก PO'],['expected_date','นัดส่ง'],['received_date','รับครบ'],['complete','สถานะ'],['on_time','OTIF ในช่วงที่เลือก'],['lead_days','Lead Time (วัน)'],['actions','วันที่']];
+ }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=a.inventory||[];columns=[['name','น้ำยา'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
+ $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
+ $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
+ $('#analyticsDetailsDialog').showModal();
 }

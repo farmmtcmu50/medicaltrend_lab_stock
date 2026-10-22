@@ -1,3 +1,4 @@
+import { analytics, period } from "./analytics.js";
 import QRCode from "qrcode";
 import { stockWorkflow } from "./workflows.js";
 import { subscriptionGate, tenantSetup } from "./subscription.js";
@@ -55,6 +56,25 @@ async function api(request, env) {
   if (method === "POST" && /^\/stock-counts\/[^/]+\/approve$/.test(path)) return json(await flow.approveCount(await readBody(request),path.split('/')[2]));
   if (method === "GET" && path === "/me") return json({ ok: true, user: publicUser(user) });
   if (method === "PUT" && path === "/me/password") return changeOwnPassword(request, env, user);
+  if(method==='PUT'&&path==='/dashboard/purchase-total'){
+    if(user.role!=='admin')throw httpError('ต้องใช้สิทธิ์ผู้ดูแล',403);
+    const body=await readBody(request),range=period(new URLSearchParams({period:'custom',start:body.start,end:body.end}));
+    if(typeof body.total_value!=='number'||!Number.isFinite(body.total_value)||body.total_value<0||body.total_value>1e12)throw httpError('มูลค่าไม่ถูกต้อง',400);
+    await env.DB.prepare('INSERT INTO analytics_purchase_totals(start_date,end_date,total_value,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(start_date,end_date) DO UPDATE SET total_value=excluded.total_value,updated_by=excluded.updated_by,updated_at=excluded.updated_at').bind(range.start,range.end,body.total_value,user.username,now()).run();
+    await logAudit(env,user.username,'ANALYTICS_PURCHASE_TOTAL','period',range.start+'/'+range.end,'SUCCESS',body);
+    return json({ok:true});
+  }
+  if (method === "PUT" && path === "/dashboard/delivery") {
+    if(user.role!=='admin')throw httpError('ต้องใช้สิทธิ์ผู้ดูแล',403);
+    const body=await readBody(request);
+    const valid=d=>/^\d{4}-\d{2}-\d{2}$/.test(d||'')&&!isNaN(Date.parse(d))&&new Date(d).toISOString().slice(0,10)===d;
+    if(!valid(body.issued_date)||!valid(body.expected_date)||body.expected_date<body.issued_date||body.issued_date>dateOnly(new Date()))throw httpError('วันออก PO / วันนัดส่งไม่ถูกต้อง',400);
+    const pr=await env.DB.prepare("SELECT pr_id FROM purchase_requisitions WHERE pr_id=? AND status='APPROVED'").bind(body.pr_id||'').first();
+    if(!pr)throw httpError('ไม่พบเอกสารที่อนุมัติ',404);
+    await env.DB.prepare('INSERT INTO pr_delivery_terms(pr_id,issued_date,expected_date,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(pr_id) DO UPDATE SET issued_date=excluded.issued_date,expected_date=excluded.expected_date,updated_by=excluded.updated_by,updated_at=excluded.updated_at').bind(body.pr_id,body.issued_date,body.expected_date,user.username,now()).run();
+    await logAudit(env,user.username,'DELIVERY_TERMS','pr',body.pr_id,'SUCCESS',body);
+    return json({ok:true});
+  }
   if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
   if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
@@ -184,6 +204,7 @@ async function dashboard(request, env, user) {
     ok: true,
     rows: canViewPrices(user) ? data : data.map(stripPriceFields),
     machines,
+    analytics: await analytics(env,url.searchParams,data,canViewPrices(user)),
     expiring_days: expiringDays,
     total_value: canViewPrices(user) ? totalValue : null,
     can_view_prices: canViewPrices(user),
@@ -755,7 +776,7 @@ async function backup(env, user) {
     },
   };
   if (canViewPrices(user)) {
-    for (const table of ["stock_operations","stock_operation_units","stock_counts"]) data.tables[table]=await tableRows(env,table);
+    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals"]) data.tables[table]=await tableRows(env,table);
     data.tables.users = await tableRows(env, "users");
     data.tables.audit_logs = await tableRows(env, "audit_logs");
   }
@@ -769,7 +790,7 @@ async function restore(request, env, admin) {
   const body = await readBody(request);
   if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
   const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
-  for (const table of ["stock_operations","stock_operation_units","stock_counts"]) safety.tables[table]=await tableRows(env,table);
+  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals"]) safety.tables[table]=await tableRows(env,table);
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -779,6 +800,8 @@ async function clearDatabase(request, env, admin) {
   const body = await readBody(request);
   if (String(body.password || "") !== CLEAR_PASSWORD) throw httpError("password สำหรับลบข้อมูลไม่ถูกต้อง", 403);
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM analytics_purchase_totals"),
+    env.DB.prepare("DELETE FROM pr_delivery_terms"),
     env.DB.prepare("DELETE FROM stock_operation_units"),
     env.DB.prepare("DELETE FROM stock_counts"),
     env.DB.prepare("DELETE FROM stock_operations"),
@@ -802,8 +825,8 @@ async function optimize(env, user) {
 }
 
 async function replaceTables(env, tables) {
-  const stmts = ["stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
-  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts"];
+  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
+  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
   for (const table of order) {
     for (const row of tables[table] || []) {
       const keys = Object.keys(row);

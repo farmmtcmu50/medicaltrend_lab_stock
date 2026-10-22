@@ -81,12 +81,14 @@
             <p class="muted">ภาพรวมคลังน้ำยาตามสถานะล่าสุด</p>
           </div>
           <div class="toolbar">
+            <select id="dashboardPeriod" aria-label="ช่วงเวลาวิเคราะห์"><option value="day">วันนี้</option><option value="week">7 วันล่าสุด</option><option value="month" selected>เดือนนี้</option><option value="custom">กำหนดช่วงวัน</option></select>
+            <label id="dashboardStartLabel" hidden>ตั้งแต่<input id="dashboardStart" type="date"></label><label id="dashboardEndLabel" hidden>ถึง<input id="dashboardEnd" type="date"></label>
             <input id="dashboardSearch" placeholder="ค้นหา Dashboard">
             <select id="dashboardMachineFilter" aria-label="Filter เครื่องใน Dashboard">
               <option value="">ทุกเครื่อง</option>
             </select>
             <button id="dashboardSearchBtn">ค้นหา</button>
-            <button id="refreshDashboardBtn">รีเฟรช</button>
+            <button id="refreshDashboardBtn">รีเฟรช</button><button id="setPurchaseTotalBtn" class="price-only">มูลค่าซื้อในงบประมาณ</button>
             <a class="button" href="/api/export/excel">Export Excel</a>
           </div>
         </header>
@@ -98,13 +100,20 @@
           <article class="summary-card violet price-only dashboard-filter-card" role="button" tabindex="0" data-dashboard-filter="all"><span>มูลค่า Stock</span><strong id="sumValue">0.00</strong></article>
           <article class="summary-card red price-only dashboard-filter-card" role="button" tabindex="0" data-dashboard-filter="aging"><span>Aging Inventory & Dead Stock</span><strong id="sumAgingValue">0.00</strong></article>
         </div>
-        <details class="panel">
+        <p id="analyticsPeriodNote" class="muted"></p>
+        <div id="dashboardCharts" class="analytics-grid"></div>
+        <p class="muted">คลิกกราฟหรือการ์ดเพื่อดูรายละเอียด • สถานะสต๊อกและอายุคงเหลือเป็นข้อมูลปัจจุบัน • มูลค่าประมาณจากราคาปัจจุบัน ไม่ใช่ต้นทุนแยกล็อต • ค่าเฉลี่ยคลังใช้ (ยอดต้นงวด + ปลายงวด) ÷ 2</p>
+        <dialog id="dashboardStockDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3>รายละเอียดคลังน้ำยา</h3>        <details class="panel">
           <summary>เลือก Column ที่ต้องการแสดง</summary>
           <div id="dashboardColumns" class="check-grid"></div>
         </details>
         <div class="table-wrap">
           <table id="dashboardTable" class="data-table sortable"></table>
         </div>
+</dialog>
+        <dialog id="analyticsDetailsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="analyticsDetailsTitle"></h3><div class="table-wrap"><table id="analyticsDetailsTable"></table></div></dialog>
+        <dialog id="purchaseTotalDialog" class="form-dialog"><form id="purchaseTotalForm" class="panel stack"><h3>มูลค่าการสั่งซื้อในงบประมาณ</h3><p id="purchaseTotalPeriod"></p><p class="muted">กรอกยอดซื้อรวมจริงจากบัญชีหรือทะเบียนงบประมาณสำหรับช่วงนี้ ทั้งคลังและทุกเครื่อง ยอดนี้เป็นฐาน Wastage Rate โดยไม่เปลี่ยนข้อมูลสต๊อก</p><label>มูลค่า (บาท)<input name="total_value" type="number" min="0" max="1000000000000" step="0.01" required></label><button class="primary">บันทึก</button><button id="closePurchaseTotal" type="button">ยกเลิก</button></form></dialog>
+        <dialog id="deliveryTermsDialog" class="form-dialog"><form id="deliveryTermsForm" class="panel stack"><h3>วันที่จัดซื้อ / นัดส่ง</h3><input name="pr_id" type="hidden"><label>วันออก PO<input name="issued_date" type="date" required></label><label>วันนัดส่ง<input name="expected_date" type="date" required></label><button class="primary">บันทึก</button><button type="button" id="closeDeliveryTerms">ยกเลิก</button></form></dialog>
       </section>
 
       <section id="items" class="tab">

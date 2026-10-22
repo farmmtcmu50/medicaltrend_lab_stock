@@ -26,3 +26,19 @@ A single receipt or adjustment is capped at 2,000 smallest units. A physical cou
 Validation: `TMPDIR=/private/tmp node --test tests/*.test.mjs`. Tests cover concurrent retries, unchanged movement counts, case-insensitive scans, partial packages, FEFO, write-off reasons/reports, stale counts, receipt reversal, PR outstanding amounts, role/tenant boundaries, workflow backup/restore and lost-response recovery in the client.
 
 Deploy migration before Worker/assets for the legacy database and each tenant (`node scripts/subscription.mjs update <slug>`). Keep database backups private; never commit provisioning files or credentials.
+
+## Dashboard analytics
+
+- เลือกวันนี้, 7 วันล่าสุด, เดือนนี้ หรือช่วงอิสระ (ไม่เกิน 366 วัน) ร่วมกับเครื่องและคำค้น
+- ตารางคลังอยู่ใน Popup เปิดจากกราฟหรือการ์ด สถานะ Stockout / ROP และ FEFO เป็นข้อมูลปัจจุบัน ไม่เปลี่ยนย้อนหลังตามวันที่
+- ROP นับทุกรายการที่คงเหลือไม่เกินจุดสั่งซื้อ รวมยอดศูนย์ ตัวหารคือรายการที่เปิดใช้งานภายใต้ตัวกรอง
+- มูลค่าทั้งหมดประมาณจากราคาต่อหน่วยปัจจุบัน ไม่มีต้นทุนย้อนหลังแยก Lot; ต้นงวดและปลายงวดคำนวณย้อนจาก movements รวมการกลับรายการ การนำเข้าข้อมูลที่ไม่มี movements อาจทำให้ประวัติไม่ครบ
+- Turnover = มูลค่าใช้งานสุทธิ / ((มูลค่าต้นงวด + ปลายงวด) / 2) แยกเครื่อง ไม่มีการ annualize
+- DOH = มูลค่าปลายงวด / (มูลค่าใช้งานสุทธิ / จำนวนวันในช่วง) ไม่คูณ 365 ซ้ำเมื่อฐานเป็นรายวันแล้ว ถ้าไม่มีการใช้จะแสดงว่าคำนวณไม่ได้
+- Wastage ใช้มูลค่าตัดทิ้งสุทธิ / มูลค่าการซื้อในงบประมาณที่ผู้ดูแลระบุสำหรับช่วงวันเดียวกัน ค่าฐานเป็นทั้งคลังทุกเครื่อง; ตัวกรองเครื่อง/คำค้นจำกัดเฉพาะตัวเศษ จึงตีความเป็นสัดส่วนต่อฐานทั้งคลัง ค่าฐานไม่เปลี่ยนสต๊อก มี Audit และรวมใน Backup
+- Heatmap สาเหตุจำแนกจากข้อความตัดทิ้ง: หมดอายุ/expire, เสื่อม/เสีย/damage, อื่น ๆ การกลับรายการใช้สาเหตุเดิม
+- FEFO แบ่งหมดอายุ, 0–29 วัน, 30–59 วัน, 60–89 วัน ตารางแสดงหน่วยและจำนวนจริง กราฟนับ Lot/รายการ ไม่บวกหน่วยต่างชนิดเข้าด้วยกัน
+- คลิกกราฟ OTIF หรือ Lead Time > กำหนดวันที่ เพื่อบันทึกวันออก PO จริงและวันนัดส่งใน PR ที่อนุมัติแล้ว ไม่ถือวันขอซื้อเป็นวันออก PO อัตโนมัติ ข้อมูลรับครบมาจากการรับเข้าที่ผูกบรรทัด PR และยังไม่ถูกกลับรายการ
+- OTIF แยก Vendor โดยนับคู่เอกสาร/Vendor (PO เดียวหลาย Vendor แยกตามส่วนของ Vendor นั้น) ต้องรับครบทุกบรรทัดภายในวันนัดส่ง ฐานคือเอกสารที่ออกในช่วงและถึงวันนัดส่งแล้ว ไม่รวมวันที่ไม่ครบหรือยังไม่ถึงกำหนด เอกสารค้างรับที่ถึงกำหนดถือว่าไม่ผ่าน
+- Lead Time นับจากออก PO ถึงวันที่รับครบ เฉลี่ยต่อเอกสาร/Vendor ที่รับครบในช่วง พร้อมแนวโน้มรายเดือน ไม่รวมวันที่ขาดหรือเรียงลำดับผิด
+- บัญชีพนักงานไม่เห็นมูลค่า, Turnover, DOH, Wastage หรือฐานงบประมาณ และแก้ไขวันที่จัดซื้อไม่ได้
