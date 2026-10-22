@@ -23,6 +23,23 @@ export async function supplierApi(request,env,user,helpers){
   ]);
   return {ok:true,supplier,items:items.results,stock:stock.results,purchased:purchased.results};
  }
+ if(method==='DELETE'&&/^\/api\/suppliers\/[^/]+$/.test(path)){
+  if(user.role!=='admin')throw fail('ต้องใช้สิทธิ์ผู้ดูแลเพื่อลบ Supplier',403);
+  const id=decodeURIComponent(path.split('/').at(-1));
+  if(id==='SUP-UNASSIGNED')throw fail('ไม่สามารถลบหมวดยังไม่ระบุ Supplier ได้');
+  const before=await env.DB.prepare('SELECT * FROM suppliers WHERE supplier_id=?').bind(id).first();
+  if(!before)return {ok:true,already_deleted:true};
+  if(before.is_placeholder)throw fail('ไม่สามารถลบหมวดยังไม่ระบุ Supplier ได้');
+  const time=new Date().toISOString();
+  await env.DB.batch([
+   env.DB.prepare(`INSERT INTO audit_logs(audit_id,timestamp,username,action,target_type,target_id,result,details) SELECT ?,?,?,'DELETE_SUPPLIER','supplier',supplier_id,'SUCCESS',json_object('before',json(?),'moved_items',(SELECT COUNT(*) FROM items WHERE supplier_id=?),'moved_units',(SELECT COUNT(*) FROM stock_units WHERE supplier_id=?),'moved_pr_lines',(SELECT COUNT(*) FROM purchase_requisition_items WHERE supplier_id=?),'target','SUP-UNASSIGNED') FROM suppliers WHERE supplier_id=?`).bind(crypto.randomUUID(),time,user.username,JSON.stringify(before),id,id,id,id),
+   env.DB.prepare("UPDATE items SET supplier_id='SUP-UNASSIGNED',supplier=(SELECT name FROM suppliers WHERE supplier_id='SUP-UNASSIGNED'),updated_at=?,updated_by=? WHERE supplier_id=?").bind(time,user.username,id),
+   env.DB.prepare("UPDATE stock_units SET supplier_id='SUP-UNASSIGNED',supplier_verified=0 WHERE supplier_id=?").bind(id),
+   env.DB.prepare("UPDATE purchase_requisition_items SET supplier_id='SUP-UNASSIGNED' WHERE supplier_id=?").bind(id),
+   env.DB.prepare('DELETE FROM suppliers WHERE supplier_id=? AND is_placeholder=0').bind(id)
+  ]);
+  return {ok:true};
+ }
  if(!['POST','PUT'].includes(method))throw fail('Method not allowed',405);
  if(user.role!=='admin')throw fail('ต้องใช้สิทธิ์ผู้ดูแลเพื่อแก้ไขทะเบียน Supplier',403);
  const body=await helpers.readBody(request),id=method==='POST'?crypto.randomUUID():decodeURIComponent(path.split('/').at(-1));

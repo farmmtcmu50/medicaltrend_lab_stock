@@ -1796,9 +1796,10 @@ async function refreshSuppliers(){
  const rows=response.rows.filter(s=>[s.name,s.contact_name,s.phone,s.email].some(v=>String(v||'').toLowerCase().includes(q)));
  renderTable($('#suppliersTable'),[['name','Supplier'],['contact_name','ผู้ติดต่อ'],['phone','โทรศัพท์'],['email','อีเมล'],['item_count','รายการน้ำยาที่ผูก'],['stock_items','รายการที่มี Stock'],['stock_lots','Lot ใน Stock'],['is_active','สถานะ'],['actions','จัดการ']],rows,{
   is_active:(v,r)=>r.is_placeholder?'รอระบุผู้ขายจริง':v?'เปิดใช้งาน':'ปิดใช้งาน',
-  actions:(_,r)=>`<button data-supplier-view="${esc(r.supplier_id)}">น้ำยา / Stock</button> ${state.user.role==='admin'&&!r.is_placeholder?`<button data-supplier-edit="${esc(r.supplier_id)}">แก้ไข</button>`:''}`
+  actions:(_,r)=>`<button data-supplier-view="${esc(r.supplier_id)}">น้ำยา / Stock</button> ${state.user.role==='admin'&&!r.is_placeholder?`<button data-supplier-edit="${esc(r.supplier_id)}">แก้ไข</button><button class="danger" data-supplier-delete="${esc(r.supplier_id)}">ลบ</button>`:''}`
  });
  $$('[data-supplier-view]').forEach(button=>button.addEventListener('click',()=>openSupplierDetails(button.dataset.supplierView).catch(e=>toast(e.message,true))));
+ $$('[data-supplier-delete]').forEach(button=>button.addEventListener('click',async()=>{const row=state.suppliers.find(s=>s.supplier_id===button.dataset.supplierDelete);if(!await confirmBox('ลบ Supplier',`ลบ ${esc(row.name)} และย้ายรายการน้ำยา สต๊อก และการอ้างอิงเอกสาร ไปยัง “ยังไม่ระบุ Supplier” อัตโนมัติ โดยจำนวนสต๊อกไม่เปลี่ยน ต้องการดำเนินการหรือไม่?`))return;try{await api('/api/suppliers/'+encodeURIComponent(row.supplier_id),{method:'DELETE'});await Promise.all([refreshSuppliers(),refreshItems(),refreshDashboard()]);toast('ลบ Supplier และย้ายข้อมูลไปยังยังไม่ระบุ Supplier แล้ว');}catch(e){toast(e.message,true);}}));
  $$('[data-supplier-edit]').forEach(button=>button.addEventListener('click',()=>openSupplierForm(button.dataset.supplierEdit)));
 }
 function openSupplierForm(id){

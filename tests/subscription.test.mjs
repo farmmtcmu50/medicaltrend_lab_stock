@@ -381,3 +381,24 @@ test('lot management preserves QR and package identity, guards history and stale
  const otherCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
  assert.equal((await tenantRequest('tenant-b','/api/item-lots?item_id='+item,{cookie:otherCookie})).status,404);
 });
+
+test('deleting supplier moves item, stock and PR links atomically to unassigned and preserves stock',async()=>{
+ const cookie=await wfAuth(),call=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
+ const supplier=(await call('/api/suppliers',{name:'Supplier to delete'})).data.supplier_id;
+ const item=(await call('/api/items',{supplier_id:supplier,reagent_name:'Deletion test',main_unit:'ขวด',has_sub_unit:0})).data.item_id;
+ await wfPost('/api/receive',{item_id:item,quantity:2,lot:'DELETE-SUPPLIER',expiry_date:'2028-01-01'},cookie);
+ const pr=await call('/api/purchase-requisitions',{requester:'Delete test',items:[{item_id:item,item_name:'Deletion test',supplier:'Supplier to delete',order_qty:1,unit:'ขวด'}]});
+ const before=(await aDb.prepare('SELECT barcode,status,lot,expiry_date FROM stock_units WHERE item_id=? ORDER BY barcode').bind(item).all()).results;
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/suppliers/'+supplier,{method:'DELETE',cookie:staff})).status,403);
+ assert.equal((await call('/api/suppliers/SUP-UNASSIGNED',undefined,'DELETE')).status,400);
+ assert.equal((await call('/api/suppliers/'+supplier,undefined,'DELETE')).status,200);
+ assert.equal((await aDb.prepare('SELECT supplier_id FROM items WHERE item_id=?').bind(item).first()).supplier_id,'SUP-UNASSIGNED');
+ assert.deepEqual((await aDb.prepare('SELECT barcode,status,lot,expiry_date FROM stock_units WHERE item_id=? ORDER BY barcode').bind(item).all()).results,before);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND supplier_id='SUP-UNASSIGNED' AND supplier_verified=0").bind(item).first()).n,2);
+ assert.equal((await aDb.prepare('SELECT supplier_id FROM purchase_requisition_items WHERE pr_id=?').bind(pr.data.pr_id).first()).supplier_id,'SUP-UNASSIGNED');
+ assert.equal((await call('/api/suppliers/'+supplier,undefined,'DELETE')).status,200);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE target_id=? AND action='DELETE_SUPPLIER'").bind(supplier).first()).n,1);
+ assert.equal((await aDb.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ assert.equal((await tenantRequest('tenant-a','/api/suppliers/'+supplier,{cookie})).status,404);
+});
