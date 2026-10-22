@@ -1736,7 +1736,7 @@ function renderAnalytics(){
  const all=rows.length,empty=rows.filter(r=>Number(r.qty_sub)<=0).length,rop=rows.filter(r=>Number(r.qty_sub)<=Number(r.reorder_point_sub)).length;
  const pct=(n,d)=>d>0?(n/d*100).toFixed(1)+'%':'ไม่มีข้อมูล';
  const pie=(n,d,color)=>`<div class="pie-layout"><div class="analytics-pie" style="background:conic-gradient(${color} 0 ${d?n/d*100:0}%,#e7edf5 0 100%)"><span>${pct(n,d)}</span></div><div><strong>${n} / ${d} รายการ</strong><p>นับเฉพาะรายการที่เปิดใช้งาน</p></div></div>`;
- const card=(key,title,sub,content,price=false)=>`<article class="analytics-card${price?' price-only':''}" tabindex="0" role="button" data-analytic="${key}"><h3>${title}</h3><p>${sub}</p>${content}</article>`;
+ const card=(key,title,sub,content,price=false)=>`<article class="analytics-card${price?' price-only':''}" ${key==='near'?'':'tabindex="0" role="button"'} data-analytic="${key}"><h3>${title}</h3><p>${sub}</p>${content}</article>`;
  const sum=(list,key)=>list.reduce((s,r)=>s+Number(r[key]||0),0);
  const inventory=a.inventory||[],groups=new Map();for(const row of inventory){if(!groups.has(row.machine))groups.set(row.machine,[]);groups.get(row.machine).push(row);}
  const machines=[...groups].map(([name,list])=>{const average=sum(list,'average_value'),used=sum(list,'used_value');return {name,average,used,value:average>0?used/average:null};});
@@ -1751,7 +1751,8 @@ function renderAnalytics(){
  const heat=`<span>เครื่อง / สาเหตุ</span>${reasons.map(r=>`<span>${esc(r)}</span>`).join('')}`+heatRows.map(r=>`<span>${esc(r.name)}</span>${r.values.map(v=>`<span style="background:rgba(239,68,68,${.08+.6*Math.min(1,Math.max(0,v)/maxWaste)})"><b>${money(v)}</b></span>`).join('')}`).join('');
  const nearMachines=[...new Set(a.near.map(r=>r.machine||'ไม่ระบุเครื่อง'))];
  const maxLots=Math.max(...nearMachines.map(machine=>a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine).length),1);
- const stacked=nearMachines.map(machine=>{const list=a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine);return `<div class="analytics-bar"><span>${esc(machine)}</span><div class="analytics-track">${nearBuckets.map((bucket,index)=>{const count=list.filter(r=>r.bucket===bucket).length;return `<i title="${esc(bucket)}: ${count} Lot" style="width:${count/maxLots*100}%;background:${colors[index]}"></i>`;}).join('')}</div><b>${list.length} Lot</b></div>`;}).join('')||'<p>ไม่มี Lot ที่หมดอายุหรือใกล้หมดอายุภายใน 90 วัน</p>';
+ const stacked=nearMachines.map(machine=>{const list=a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine);return `<div class="analytics-bar"><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูน้ำยาเครื่อง ${esc(machine)}">${esc(machine)}</button><div class="analytics-track" data-near-machine="${esc(machine)}">${nearBuckets.map((bucket,index)=>{const count=list.filter(r=>r.bucket===bucket).length;return count?`<button class="near-segment" data-near-machine="${esc(machine)}" data-near-bucket="${esc(bucket)}" title="${esc(machine)} · ${esc(bucket)}: ${count} Lot" aria-label="${esc(machine)} · ${esc(bucket)}: ${count} Lot" style="width:${count/maxLots*100}%;background:${colors[index]}"></button>`:'';}).join('')}</div><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูทั้งหมด ${list.length} Lot ของ ${esc(machine)}">${list.length} Lot</button></div>`;}).join('')||'<p>ไม่มี Lot ที่หมดอายุหรือใกล้หมดอายุภายใน 90 วัน</p>';
+
  const legend=nearBuckets.map((bucket,index)=>`<span style="color:${colors[index]}">● ${esc(bucket)}</span>`).join(' · ');
  const trendGroups=new Map();for(const l of leads){const month=l.received_date.slice(0,7);if(!trendGroups.has(month))trendGroups.set(month,[]);trendGroups.get(month).push(l.lead_days);}
  const trend=[...trendGroups].sort().map(([name,v])=>({name,value:v.reduce((s,n)=>s+n,0)/v.length})),maxLead=Math.max(...trend.map(r=>r.value),1);
@@ -1764,15 +1765,15 @@ function renderAnalytics(){
  (a.inventory?card('turnover','Inventory Turnover Ratio','มูลค่าใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย · แยกตามเครื่อง',bars(machines,' เท่า'),true)+
  card('doh','Days On Hand','มูลค่าปลายงวด ÷ มูลค่าใช้งานเฉลี่ยต่อวัน',`<strong class="metric">${used>0?(closing/(used/a.range.days)).toFixed(1)+' วัน':'คำนวณไม่ได้'}</strong><p>อ้างอิงการใช้ ${a.range.days} วัน • เป้าหมายตัวอย่าง 30–45 วัน ปรับตาม Lead Time</p>`,true)+
  card('wastage','Wastage Rate','มูลค่าตัดทิ้งสุทธิ ÷ มูลค่าการสั่งซื้อในงบประมาณ',`<strong class="metric">${a.purchase_total===null?'รอระบุมูลค่าซื้อ':pct(waste,a.purchase_total)}</strong><p>เป้าหมาย &lt;1–2% • ฐานซื้อทั้งคลัง ${a.purchase_total===null?'ยังไม่ระบุ':money(a.purchase_total)+' บาท'} • มูลค่าตัดทิ้งตามตัวกรอง</p><div class="analytics-heat">${heat}</div><p>กำหนดฐานที่ปุ่ม “มูลค่าซื้อในงบประมาณ” • ยอดรับเข้าในช่วงนี้ ${money(received)} บาท</p>`,true):'')+
- card('near','Near-Expiry Alerts','FEFO · จำนวน Lot / รายการ แยกกลุ่มวันแบบไม่ซ้ำกัน',stacked+`<p>${legend}</p>`+'<p>คลิกเพื่อดูจำนวนคงเหลือแยกน้ำยา / Lot / หน่วย</p>')+
+ card('near','Near-Expiry Alerts','FEFO · จำนวน Lot / รายการ แยกกลุ่มวันแบบไม่ซ้ำกัน',stacked+`<p>${legend}</p>`+'<p>คลิกชื่อเครื่องเพื่อดูทุก Lot หรือคลิกช่วงสีเพื่อดูเฉพาะกลุ่มวันหมดอายุ</p><button type="button" data-near-all>ดูทุกเครื่อง / ยี่ห้อ</button>')+
  card('otif','On-Time In-Full','สัดส่วนเอกสารที่รับครบภายในวันนัดส่ง · แยก Vendor',bars(vendors,'%', '#10b981',100)+`<p>ฐาน ${due.length} คู่เอกสาร/Vendor ที่ออกในช่วงและถึงวันนัดส่งแล้ว • ไม่รวมเอกสารที่ยังไม่ได้ระบุวันที่</p>`)+
  card('lead','Average Lead Time','วันรับครบจริง − วันออก PO · เฉลี่ยต่อเอกสาร/Vendor',`<strong class="metric">${leads.length?(sum(leads,'lead_days')/leads.length).toFixed(1)+' วัน':'ไม่มีข้อมูล'}</strong>${line}<p>จัดกลุ่มแนวโน้มตามเดือนที่รับครบ • คลิกเพื่อบันทึกวันออก PO / นัดส่ง</p>`);
- $$('[data-analytic]').forEach(el=>{el.addEventListener('click',()=>openAnalyticsDetails(el.dataset.analytic));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openAnalyticsDetails(el.dataset.analytic);}});});
+ $$('[data-analytic]').forEach(el=>{el.addEventListener('click',event=>{const drill=event.target.closest('[data-near-machine]');if(el.dataset.analytic==='near'&&drill){openAnalyticsDetails('near',{machine:drill.dataset.nearMachine,bucket:drill.dataset.nearBucket});return;}openAnalyticsDetails(el.dataset.analytic);});el.addEventListener('keydown',e=>{if(e.target!==el)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();openAnalyticsDetails(el.dataset.analytic);}});});
 }
-function openAnalyticsDetails(key){
+function openAnalyticsDetails(key,filter={}){
  if(key==='stockout'||key==='reorder'){state.dashboardCardFilter=key==='stockout'?'critical':'reorder';renderDashboardCardFilterState();renderDashboardTable();$('#dashboardStockDialog').showModal();return;}
  const a=state.analytics;let rows,columns,title;
- if(key==='near'){title='น้ำยาใกล้หมดอายุ / หมดอายุ เรียงตาม FEFO';rows=a.near;columns=[['name','น้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['days','วันคงเหลือ'],['bucket','กลุ่ม'],['quantity','จำนวน'],['unit','หน่วย']];}
+ if(key==='near'){title='น้ำยาใกล้หมดอายุ / หมดอายุ'+(filter.machine?' · '+filter.machine:' · ทุกเครื่อง / ยี่ห้อ')+(filter.bucket?' · '+filter.bucket:'')+' (FEFO)';rows=nearExpiryRows(a.near,filter);columns=[['name','น้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['days','วันคงเหลือ'],['bucket','กลุ่ม'],['quantity','จำนวน'],['unit','หน่วย']];}
  else if(key==='otif'||key==='lead'){
   title='การส่งมอบและระยะเวลารอของ — เอกสารที่อนุมัติ';rows=a.deliveries.map(d=>({...d,complete:d.complete?'รับครบ':'ยังไม่ครบ',on_time:d.eligible?(d.on_time?'ตรงเวลาและครบ':'ไม่ผ่าน'):'ยังไม่เข้าเกณฑ์ / วันที่ไม่ครบ',lead_days:d.lead_days??'—',actions:state.user.role==='admin'?`<button data-delivery="${esc(d.pr_id)}">กำหนดวันที่</button>`:''}));
   columns=[['pr_no','เอกสาร PR ที่อ้างอิง PO'],['vendor','Vendor'],['issued_date','ออก PO'],['expected_date','นัดส่ง'],['received_date','รับครบ'],['complete','สถานะ'],['on_time','OTIF ในช่วงที่เลือก'],['lead_days','Lead Time (วัน)'],['actions','วันที่']];
@@ -1836,3 +1837,5 @@ async function loadLotUnits(append=false){
  renderTable($('#lotUnitsTable'),[['barcode','QR'],['parent_barcode','QR หน่วยหลัก'],['lot','Lot'],['expiry_date','หมดอายุ'],['status','สถานะ'],['received_at','รับเข้า'],['actions','พิมพ์']],state.lotUnitRows,{actions:(_,r)=>r.status==='IN_STOCK'?`<button data-print-lot-qr="${esc(r.barcode)}">พิมพ์ฉลาก</button>`:''});
  $$('[data-print-lot-qr]').forEach(button=>button.addEventListener('click',()=>printLabels([stockRowToLabel(state.lotUnitRows.find(r=>r.barcode===button.dataset.printLotQr))])));
 }
+
+function nearExpiryRows(rows,filter={}){return rows.filter(row=>(!filter.machine||(row.machine||'ไม่ระบุเครื่อง')===filter.machine)&&(!filter.bucket||row.bucket===filter.bucket));}

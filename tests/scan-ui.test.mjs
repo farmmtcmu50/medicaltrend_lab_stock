@@ -56,3 +56,13 @@ test('validation failure clears a pending key and does not leave the scanner loc
  assert.equal(vm.runInContext('readPendingStockWrite()',context),null);
  assert.equal(vm.runInContext('workflowUi.busy',context),false);
 });
+
+test('near-expiry drilldown filters by exact machine and expiry bucket without mixing machines',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.analytics={near:[{machine:'iChroma',bucket:'หมดอายุ',lot:'A'},{machine:'iChroma',bucket:'30–59 วัน',lot:'B'},{machine:'iChroma Plus',bucket:'หมดอายุ',lot:'C'},{machine:'',bucket:'หมดอายุ',lot:'D'}]};`,context);
+ const lots=expression=>JSON.parse(vm.runInContext(`JSON.stringify(${expression}.map(r=>r.lot))`,context));
+ assert.deepEqual(lots("nearExpiryRows(state.analytics.near,{machine:'iChroma'})"),['A','B']);
+ assert.deepEqual(lots("nearExpiryRows(state.analytics.near,{machine:'iChroma',bucket:'หมดอายุ'})"),['A']);
+ assert.deepEqual(lots("nearExpiryRows(state.analytics.near,{machine:'ไม่ระบุเครื่อง'})"),['D']);
+ assert.deepEqual(lots('nearExpiryRows(state.analytics.near)'),['A','B','C','D']);
+});
