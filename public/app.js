@@ -1608,12 +1608,20 @@ function bindWorkflowUi(){
  $('#moreOperationsBtn').addEventListener('click',safe(()=>refreshOperations(true)));
  $('#refreshCountsBtn').addEventListener('click',safe(refreshCounts));
  $('#countForm').addEventListener('submit',safe(async event=>{
-  event.preventDefault();const body=formData(event.target);
+  event.preventDefault();if(!$('#countForm').item_id.value){$('#countItemSearch').setCustomValidity('กรุณาเลือกน้ำยาจากผลการค้นหา');$('#countItemSearch').reportValidity();return;}const body=formData(event.target);
   const res=await stockWrite('/api/stock-counts',body);
   toast(`บันทึกผลนับแล้ว: ในระบบ ${res.system_qty} / นับจริง ${res.counted_qty} / ต่าง ${res.difference}`);
   await refreshCounts();
  }));
- $('#countForm').item_id.addEventListener('change',safe(refreshCountLots));
+ $('#countItemSearch').addEventListener('input',safe(async()=>{
+  const form=$('#countForm'),search=$('#countItemSearch');
+  search.setCustomValidity('');
+  const item=state.items.find(i=>Number(i.is_active??1)&&countItemLabel(i)===search.value);
+  const next=item?.item_id||'';
+  if(form.item_id.value===next)return;
+  form.item_id.value=next;form.lot.value='';form.expiry_date.value='';
+  await refreshCountLots();
+ }));
  $('#countLotSelect').addEventListener('change',()=>{
   const selected=$('#countLotSelect').selectedOptions[0];
   $('#countForm').lot.value=selected.dataset.lot||'';
@@ -1647,10 +1655,13 @@ async function refreshOperations(append=false){
   try{await stockWrite(`/api/operations/${encodeURIComponent(button.dataset.reverseOperation)}/reverse`,{reason:why});await refreshOperations();await refreshStock();['dashboard','reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast('กลับรายการสำเร็จ');}catch(error){toast(error.message,true);}
  }));
 }
+function countItemLabel(item){return `${item.reagent_name} (${item.sub_unit||item.main_unit}) · ${item.item_id}`;}
 async function refreshCounts(){
- const form=$('#countForm'),selected=form.item_id.value;
- form.item_id.innerHTML='<option value="">เลือกสินค้า</option>'+state.items.filter(i=>Number(i.is_active??1)).map(item=>`<option value="${esc(item.item_id)}">${esc(item.reagent_name)} (${esc(item.sub_unit||item.main_unit)})</option>`).join('');
- form.item_id.value=selected;await refreshCountLots();
+ const form=$('#countForm'),selected=state.items.find(i=>i.item_id===form.item_id.value&&Number(i.is_active??1));
+ $('#countItemOptions').innerHTML=state.items.filter(i=>Number(i.is_active??1)).map(item=>`<option value="${esc(countItemLabel(item))}"></option>`).join('');
+ if(!selected){form.item_id.value='';$('#countItemSearch').value='';}
+ else $('#countItemSearch').value=countItemLabel(selected);
+ await refreshCountLots();
  const res=await api('/api/stock-counts');workflowUi.counts=res.rows;
  renderTable($('#countsTable'),[['created_at','วันที่นับ'],['reagent_name','สินค้า'],['lot','Lot'],['expiry_date','หมดอายุ'],['system_qty','ยอดระบบ ณ ตอนนับ'],['counted_qty','นับจริง'],['difference','ผลต่าง'],['unit','หน่วย'],['reason','เหตุผล'],['status','สถานะ'],['approved_by','ผู้ยืนยัน'],['actions','ยืนยัน']],res.rows.map(row=>({...row,difference:row.counted_qty-row.system_qty})),{
   status:(value,row)=>row.status==='APPROVED'?`ยืนยันแล้ว${row.reversed_by?' (กลับรายการแล้ว)':''}`:'รอยืนยัน',
@@ -1667,6 +1678,7 @@ async function refreshCountLots(){
  $('#countUnit').textContent=item?.sub_unit||item?.main_unit||'หน่วย';
  if(!itemId){$('#countLotSelect').innerHTML='<option value="">ระบุ Lot / วันหมดอายุเอง</option>';return;}
  const result=await api(`/api/stock-counts/lots?item_id=${encodeURIComponent(itemId)}`);
+ if($('#countForm').item_id.value!==itemId)return;
  $('#countLotSelect').innerHTML='<option value="">ระบุ Lot / วันหมดอายุเอง</option>'+result.rows.map((row,index)=>`<option value="${index}" data-lot="${esc(row.lot)}" data-expiry="${esc(row.expiry_date)}">${esc(row.lot)} · ${esc(row.expiry_date)} · ${row.quantity} ${esc(item?.sub_unit||'')}</option>`).join('');
 }
 async function refreshReceiptLines(itemId){

@@ -169,7 +169,7 @@
       <section id="counts" class="tab">
         <header class="page-head"><div><h2>ตรวจนับและปรับยอดสต๊อก</h2><p>นับเป็นหน่วยที่ใช้ตัดจริง แยกสินค้า Lot และวันหมดอายุ ผู้ดูแลตรวจผลต่างก่อนยืนยัน</p></div><button id="refreshCountsBtn">รีเฟรช</button></header>
         <form id="countForm" class="panel grid-form">
-          <label>สินค้า<select name="item_id" required></select></label>
+          <label>ค้นหารายการน้ำยา<input id="countItemSearch" list="countItemOptions" placeholder="พิมพ์ชื่อรายการน้ำยา" autocomplete="off" required><datalist id="countItemOptions"></datalist><input name="item_id" type="hidden"></label>
           <label>Lot ที่มีในคลัง<select id="countLotSelect"><option value="">ระบุ Lot / วันหมดอายุเอง</option></select></label>
           <label>Lot<input name="lot" required></label><label>วันหมดอายุ<input name="expiry_date" type="date" required></label>
           <label><span>ยอดนับจริง (<span id="countUnit">หน่วย</span>)</span><input name="counted_qty" type="number" min="0" max="1000000000" step="1" required></label>
