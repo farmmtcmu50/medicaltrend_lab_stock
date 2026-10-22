@@ -30,6 +30,7 @@ before(async()=>{
  db=await mf.getD1Database('CONTROL_DB','control');aDb=await mf.getD1Database('DB','tenant-a');bDb=await mf.getD1Database('DB','tenant-b');
  for(const file of (await readdir('subscription/migrations')).sort())await sql(db,await readFile('subscription/migrations/'+file,'utf8'));
  for(const file of (await readdir('migrations')).sort()){const content=await readFile('migrations/'+file,'utf8');await sql(aDb,content);await sql(bDb,content);}
+ for(const database of [aDb,bDb])await database.prepare("INSERT INTO suppliers(supplier_id,name,created_at,updated_at) VALUES('test-supplier','Test Supplier',datetime('now'),datetime('now'))").run();
 });
 after(async()=>{await mf?.dispose();});
 test('calendar renewal clamps month end and preserves leap years',()=>{
@@ -158,7 +159,7 @@ test('QR query plan avoids a table scan with 10,000 historical rows', async () =
 test('optional sub units preserve single-unit stock, conversion, backups and history',async()=>{
  const cookie=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
  const send=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
- const base={reagent_name:'Single unit',main_unit:'ขวด',has_sub_unit:0,sub_unit:'ignored',sub_per_main:99,main_unit_price:120};
+ const base={supplier_id:'test-supplier',reagent_name:'Single unit',main_unit:'ขวด',has_sub_unit:0,sub_unit:'ignored',sub_per_main:99,main_unit_price:120};
  const added=await send('/api/items',base);assert.equal(added.status,200);
  const id=added.data.item_id;
  let item=await aDb.prepare('SELECT * FROM items WHERE item_id=?').bind(id).first();
@@ -181,7 +182,7 @@ async function wfAuth(){if(!workflowCookie)workflowCookie=(await tenantRequest('
 async function wfPost(path,body={},cookie){return tenantRequest('tenant-a',path,{method:'POST',cookie:cookie||await wfAuth(),body:{request_id:randomUUID(),...body}});}
 test('stock operations commit once across parallel retries and reject reused payloads',async()=>{
  const cookie=await wfAuth();
- workflowItem=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{reagent_name:'Workflow reagent',main_unit:'กล่อง',has_sub_unit:1,sub_unit:'ขวด',sub_per_main:5,main_unit_price:500}})).data.item_id;
+ workflowItem=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{supplier_id:'test-supplier',reagent_name:'Workflow reagent',main_unit:'กล่อง',has_sub_unit:1,sub_unit:'ขวด',sub_per_main:5,main_unit_price:500}})).data.item_id;
  const body={request_id:randomUUID(),item_id:workflowItem,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'WF',expiry_date:'2029-12-31'};
  const [a,b]=await Promise.all([wfPost('/api/receive',body,cookie),wfPost('/api/receive',body,cookie)]);
  assert.equal(a.status,200,JSON.stringify(a.data));assert.equal(b.status,200,JSON.stringify(b.data));assert.equal(a.data.operation_id,b.data.operation_id);
@@ -258,7 +259,7 @@ test('staff can submit counts but cannot approve or reverse; full backup restore
 });
 
 test('different request IDs competing for one QR cannot both decrement stock',async()=>{
- const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie:await wfAuth(),body:{reagent_name:'Race item',main_unit:'ขวด',has_sub_unit:0}})).data.item_id;
+ const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie:await wfAuth(),body:{supplier_id:'test-supplier',reagent_name:'Race item',main_unit:'ขวด',has_sub_unit:0}})).data.item_id;
  const receipt=await wfPost('/api/receive',{item_id:item,quantity:1,lot:'RACE',expiry_date:'2030-01-01'});assert.equal(receipt.status,200);
  const barcode=receipt.data.labels[0].code;
  const results=await Promise.all([wfPost('/api/consume',{barcode}),wfPost('/api/consume',{barcode})]);
@@ -293,4 +294,62 @@ test('dashboard aggregates analytics, enforces delivery date permissions and pre
  const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.pr_delivery_terms.some(r=>r.pr_id===pr));assert.equal(backup.data.tables.analytics_purchase_totals[0].total_value,5000);
  assert.equal((await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:backup.data})).status,200);
  assert.equal((await aDb.prepare('SELECT issued_date FROM pr_delivery_terms WHERE pr_id=?').bind(pr).first()).issued_date,today);
+});
+
+test('supplier registry requires item links, protects master edits, and preserves receipt provenance',async()=>{
+ const cookie=await wfAuth(),call=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
+ const created=await call('/api/suppliers',{name:' Supplier Alpha ',phone:'053000000'});assert.equal(created.status,200,JSON.stringify(created.data));const alpha=created.data.supplier_id;
+ assert.equal((await call('/api/suppliers',{name:'supplier alpha'})).status,409);
+ const beta=(await call('/api/suppliers',{name:'Supplier Beta'})).data.supplier_id;
+ const itemBody={reagent_name:'Supplier tracking',main_unit:'ขวด',has_sub_unit:0,main_unit_price:20};
+ assert.equal((await call('/api/items',itemBody)).status,400);
+ assert.equal((await call('/api/items',{...itemBody,supplier_id:'missing'})).status,400);
+ assert.equal((await call('/api/items',{...itemBody,supplier_id:'SUP-UNASSIGNED'})).status,400);
+ const item=(await call('/api/items',{...itemBody,supplier_id:alpha})).data.item_id;assert.ok(item);
+ const receive=await wfPost('/api/receive',{item_id:item,quantity:2,lot:'ALPHA',expiry_date:'2028-12-31'},cookie);assert.equal(receive.status,200,JSON.stringify(receive.data));
+ const original=await aDb.prepare('SELECT supplier_id,supplier_verified FROM stock_units WHERE item_id=? LIMIT 1').bind(item).first();assert.equal(original.supplier_id,alpha);assert.equal(original.supplier_verified,1);
+ assert.equal((await call('/api/items/'+item,{...itemBody,supplier_id:beta},'PUT')).status,200);
+ const old=await tenantRequest('tenant-a','/api/suppliers/'+alpha,{cookie});assert.ok(old.data.stock.some(r=>r.item_id===item&&r.quantity===2));assert.ok(!old.data.items.some(r=>r.item_id===item));
+ await wfPost('/api/receive',{item_id:item,quantity:1,lot:'BETA',expiry_date:'2028-12-31'},cookie);
+ const latest=await tenantRequest('tenant-a','/api/suppliers/'+beta,{cookie});assert.ok(latest.data.items.some(r=>r.item_id===item));assert.ok(latest.data.stock.some(r=>r.item_id===item&&r.quantity===1));
+ assert.equal((await call('/api/suppliers/'+beta,{name:'Supplier Beta Renamed',is_active:0},'PUT')).status,200);
+ assert.equal((await aDb.prepare('SELECT supplier FROM items WHERE item_id=?').bind(item).first()).supplier,'Supplier Beta Renamed');
+ assert.equal((await call('/api/items',{...itemBody,supplier_id:beta})).status,400);
+ assert.equal((await call('/api/items/'+item,{...itemBody,supplier_id:beta},'PUT')).status,200);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/suppliers',{method:'POST',cookie:staff,body:{name:'No permission'}})).status,403);
+ const listing=await tenantRequest('tenant-a','/api/suppliers',{cookie:staff});assert.ok(listing.data.rows.some(r=>r.supplier_id===alpha));
+ const pr=await call('/api/purchase-requisitions',{requester:'Supplier test',items:[{item_id:item,item_name:itemBody.reagent_name,supplier:'Supplier Alpha',order_qty:1,unit:'ขวด'}]});assert.equal(pr.status,200);
+ await call('/api/purchase-requisitions/'+pr.data.pr_id+'/approve',{},'PUT');
+ const line=await aDb.prepare('SELECT line_id,supplier_id FROM purchase_requisition_items WHERE pr_id=?').bind(pr.data.pr_id).first();assert.equal(line.supplier_id,alpha);
+ await call('/api/suppliers/'+alpha,{name:'Supplier Alpha Renamed'},'PUT');
+ const prReceipt=await wfPost('/api/receive',{item_id:item,quantity:1,lot:'ALPHA-PR',expiry_date:'2028-12-31',pr_line_id:line.line_id},cookie);assert.equal(prReceipt.status,200,JSON.stringify(prReceipt.data));
+ assert.equal((await aDb.prepare("SELECT supplier_id FROM stock_units WHERE item_id=? AND lot='ALPHA-PR'").bind(item).first()).supplier_id,alpha);
+ const otherCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-b','/api/suppliers/'+alpha,{cookie:otherCookie})).status,404);
+ const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.suppliers.some(r=>r.supplier_id===alpha));
+ assert.equal((await call('/api/restore',backup.data)).status,200);
+ assert.equal((await aDb.prepare('SELECT supplier_id FROM stock_units WHERE item_id=? AND lot=? LIMIT 1').bind(item,'ALPHA').first()).supplier_id,alpha); const legacy=structuredClone(backup.data);delete legacy.tables.suppliers;
+ for(const row of legacy.tables.items)delete row.supplier_id;
+ for(const row of legacy.tables.stock_units){delete row.supplier_id;delete row.supplier_verified;}
+ for(const row of legacy.tables.purchase_requisition_items)delete row.supplier_id;
+ const restored=await call('/api/restore',legacy);assert.equal(restored.status,200,JSON.stringify(restored.data));
+ assert.equal((await aDb.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+});
+
+test('supplier migration backfills populated legacy tables without inventing unknown suppliers',async()=>{
+ const legacy=new Miniflare(convertV4MiniflareOptions({workers:[{name:'legacy',modules:[{type:'ESModule',path:'worker.js',contents:'export default {fetch(){return new Response("ok")}}'}],compatibilityDate:'2026-08-31',d1Databases:{DB:'legacy'}}]}));
+ try{
+ const database=await legacy.getD1Database('DB','legacy');
+ for(const file of (await readdir('migrations')).sort().filter(f=>f<'0009'))await sql(database,await readFile('migrations/'+file,'utf8'));
+ for(const [id,vendor]of [['one',' Vendor '],['two','vendor'],['unknown','']]){
+ await database.prepare("INSERT INTO items(item_id,reagent_name,supplier,created_at,updated_at) VALUES(?,?,?,datetime('now'),datetime('now'))").bind(id,id,vendor).run();
+ await database.prepare("INSERT INTO stock_units(barcode,item_id,reagent_name,expiry_date,received_at) VALUES(?,?,?,'2028-01-01',datetime('now'))").bind(id,id,id).run();
+ }
+ await sql(database,await readFile('migrations/0009_suppliers.sql','utf8'));
+ const one=await database.prepare("SELECT supplier_id,supplier FROM items WHERE item_id='one'").first(),two=await database.prepare("SELECT supplier_id FROM items WHERE item_id='two'").first();assert.equal(one.supplier_id,two.supplier_id);
+ assert.equal((await database.prepare("SELECT supplier_id FROM items WHERE item_id='unknown'").first()).supplier_id,'SUP-UNASSIGNED');
+ const stock=await database.prepare("SELECT supplier_id,supplier_verified FROM stock_units WHERE barcode='one'").first();assert.equal(stock.supplier_id,one.supplier_id);assert.equal(stock.supplier_verified,0);
+ assert.equal((await database.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ }finally{await legacy.dispose();}
 });

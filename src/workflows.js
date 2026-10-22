@@ -43,10 +43,10 @@ export function stockWorkflow(env,user,helpers){
  async function snapshot(itemId,lot,expiry){return (await query(snapshotSql,itemId,lot,expiry).first()).signature;}
  async function activeItem(id){const item=await helpers.getActiveItem(env,id);return Number(item.has_sub_unit)===0?{...item,sub_unit:item.main_unit,sub_per_main:1}:item;}
  function newUnits(op,item,qty,lot,expiry,note){
-  const rows=Array.from({length:qty},()=>({barcode:uid('QR'),item_id:item.item_id,reagent_name:item.reagent_name,lot,expiry_date:expiry,machine:item.machine,sub_unit:item.sub_unit,status:'IN_STOCK',received_at:timestamp(),note,parent_barcode:'',received_by:user.username,last_operation:op.id,before:null}));
+  const rows=Array.from({length:qty},()=>({barcode:uid('QR'),item_id:item.item_id,reagent_name:item.reagent_name,lot,expiry_date:expiry,machine:item.machine,sub_unit:item.sub_unit,status:'IN_STOCK',received_at:timestamp(),note,parent_barcode:'',received_by:user.username,last_operation:op.id,supplier_id:item.supplier_id,supplier_verified:op.kind==='RECEIVE'?1:0,before:null}));
   return rows;
  }
- function insertUnit(row){return query(`INSERT INTO stock_units(barcode,item_id,reagent_name,lot,expiry_date,machine,sub_unit,status,received_at,note,parent_barcode,received_by,last_operation) VALUES (?,?,?,?,?,?,?,'IN_STOCK',?,?,?,?,?)`,row.barcode,row.item_id,row.reagent_name,row.lot,row.expiry_date,row.machine,row.sub_unit,row.received_at,row.note,row.parent_barcode,row.received_by,row.last_operation);}
+ function insertUnit(row){return query(`INSERT INTO stock_units(barcode,item_id,reagent_name,lot,expiry_date,machine,sub_unit,status,received_at,note,parent_barcode,received_by,last_operation,supplier_id,supplier_verified) VALUES (?,?,?,?,?,?,?,'IN_STOCK',?,?,?,?,?,?,?)`,row.barcode,row.item_id,row.reagent_name,row.lot,row.expiry_date,row.machine,row.sub_unit,row.received_at,row.note,row.parent_barcode,row.received_by,row.last_operation,row.supplier_id,row.supplier_verified);}
  function labels(rows,item){
   const safeItem={...item};if(user.role!=='admin'){delete safeItem.unit_price;delete safeItem.main_unit_price;}
   return rows.map(row=>({code:row.barcode,type:'sub',sub_count:1,item:safeItem,lot:row.lot,expiry:row.expiry_date}));
@@ -68,6 +68,7 @@ export function stockWorkflow(env,user,helpers){
    const op=await begin(body,'RECEIVE');if(op.replay)return op.replay;
    const item=await activeItem(body.item_id), qty=integer(body.quantity,'จำนวน'), lot=String(body.lot||'').trim(),expiry=date(body.expiry_date);
    if(!lot||lot.length>100)throw fail('กรุณาระบุ Lot ไม่เกิน 100 ตัวอักษร');
+   if(!item.supplier_id||item.supplier_id==='SUP-UNASSIGNED')throw fail('กรุณาระบุ Supplier ในรายการน้ำยาก่อนรับเข้าคลัง');
    const hasSub=Number(item.has_sub_unit??1)===1;
    const mode=hasSub&&body.unit_mode!=='main'?'sub':'main',factor=hasSub?item.sub_per_main:1;
    const total=integer(qty*(mode==='main'?factor:1),'จำนวนรวม');
@@ -76,6 +77,11 @@ export function stockWorkflow(env,user,helpers){
     const line=await query(`SELECT l.*,p.status FROM purchase_requisition_items l JOIN purchase_requisitions p ON p.pr_id=l.pr_id WHERE l.line_id=?`,body.pr_line_id).first();
     if(!line||line.status!=='APPROVED')throw fail('ต้องรับจากใบ PR ที่อนุมัติแล้ว',409);
     if(line.item_id&&line.item_id!==item.item_id)throw fail('สินค้าไม่ตรงกับรายการ PR');
+    if(line.supplier_id||String(line.supplier||'').trim()){
+     const vendor=await query('SELECT supplier_id FROM suppliers WHERE ((? IS NOT NULL AND supplier_id=?) OR (? IS NULL AND name=? COLLATE NOCASE)) AND is_placeholder=0',line.supplier_id||null,line.supplier_id||null,line.supplier_id||null,String(line.supplier||'').trim()).first();
+     if(!vendor)throw fail('Supplier ใน PR ไม่ตรงทะเบียน กรุณาตรวจสอบก่อนรับเข้า');
+     item.supplier_id=vendor.supplier_id;rows.forEach(row=>row.supplier_id=vendor.supplier_id);
+    }
     const orderFactor=line.unit===item.main_unit?factor:hasSub&&line.unit===item.sub_unit?1:0;
     if(!orderFactor)throw fail('หน่วยใน PR ไม่ตรงกับสินค้า กรุณาตรวจหน่วยก่อนรับ');
     prQty=total/orderFactor;

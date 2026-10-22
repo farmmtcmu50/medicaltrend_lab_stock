@@ -147,6 +147,11 @@ function bindUi() {
   $("#restoreForm").addEventListener("submit", restoreBackup);
   $("#clearForm").addEventListener("submit", clearDatabase);
   $("#optimizeBtn").addEventListener("click", optimizeDb);
+  $('#supplierSearchBtn').addEventListener('click',()=>refreshSuppliers().catch(e=>toast(e.message,true)));
+  $('#supplierSearch').addEventListener('keydown',enter(refreshSuppliers));
+  $('#newSupplierBtn').addEventListener('click',()=>openSupplierForm());
+  $('#cancelSupplierBtn').addEventListener('click',()=>$('#supplierDialog').close());
+  $('#supplierForm').addEventListener('submit',async event=>{event.preventDefault();try{const body=formData(event.target),id=body.supplier_id;await api('/api/suppliers'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body});$('#supplierDialog').close();await Promise.all([refreshSuppliers(),refreshItems(),refreshDashboard()]);toast('บันทึก Supplier แล้ว');}catch(e){toast(e.message,true);}});
   $("#userForm").addEventListener("submit", saveUser);
   setDefaultReportDates();
   setDefaultPrMeta();
@@ -170,6 +175,7 @@ function switchTab(tab) {
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
   if (tab === "items") resizeItemsTable();
+  if (tab === "suppliers") refreshSuppliers().catch(error=>toast(error.message,true));
   if (tab === "operations") refreshOperations().catch(error=>toast(error.message,true));
   if (tab === "counts") refreshCounts().catch(error=>toast(error.message,true));
   if (state.stockViewsDirty.has(tab)) {
@@ -196,7 +202,7 @@ function showLoginError(message) {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshSettings(), refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock()]);
+  await Promise.all([refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock()]);
   await Promise.all([refreshReport(), refreshPurchaseRequisitions()]);
   if (state.user.role === "admin") await Promise.all([refreshUsers(), refreshAudit()]);
   if (location.hash) switchTab(location.hash.slice(1));
@@ -1002,11 +1008,12 @@ async function saveItem(e) {
   }
   resetItemForm();
   $("#itemDialog").close();
-  await Promise.all([refreshItems(), refreshDashboard()]);
+  await Promise.all([refreshItems(), refreshDashboard(), refreshSuppliers()]);
 }
 
 function openNewItemDialog() {
   resetItemForm();
+  renderSupplierOptions('');
   $("#itemDialogTitle").textContent = "เพิ่มน้ำยาใหม่";
   $("#itemDialog").showModal();
   $("#itemForm").reagent_name.focus();
@@ -1015,6 +1022,7 @@ function openNewItemDialog() {
 function editItem(id) {
   const item = state.items.find((x) => x.item_id === id);
   const form = $("#itemForm");
+  renderSupplierOptions(item.supplier_id);
   Object.entries(item).forEach(([k, v]) => { if (form[k]) form[k].value = v ?? ""; });
   form.item_id.value = id;
   form.has_sub_unit.checked = Number(item.has_sub_unit ?? 1) === 1;
@@ -1768,4 +1776,37 @@ function openAnalyticsDetails(key){
  $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
  $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
  $('#analyticsDetailsDialog').showModal();
+}
+
+function renderSupplierOptions(selected=$('#itemForm').supplier_id.value){
+ const options=(state.suppliers||[]).filter(s=>!s.is_placeholder&&(Number(s.is_active)||s.supplier_id===selected));
+ $('#itemForm').supplier_id.innerHTML='<option value="">เลือก Supplier จากทะเบียน</option>'+options.map(s=>`<option value="${esc(s.supplier_id)}">${esc(s.name)}${s.is_active?'':' (ปิดใช้งาน)'}</option>`).join('');
+ $('#itemForm').supplier_id.value=selected||'';
+}
+async function refreshSupplierMaster(){const res=await api('/api/suppliers?master=1');state.suppliers=res.rows;renderSupplierOptions();}
+async function refreshSuppliers(){
+ // Fetch the small master once; search locally so item selectors always retain the full registry.
+ const response=await api('/api/suppliers');state.suppliers=response.rows;renderSupplierOptions();
+ const q=$('#supplierSearch').value.trim().toLowerCase();
+ const rows=response.rows.filter(s=>[s.name,s.contact_name,s.phone,s.email].some(v=>String(v||'').toLowerCase().includes(q)));
+ renderTable($('#suppliersTable'),[['name','Supplier'],['contact_name','ผู้ติดต่อ'],['phone','โทรศัพท์'],['email','อีเมล'],['item_count','รายการน้ำยาที่ผูก'],['stock_items','รายการที่มี Stock'],['stock_lots','Lot ใน Stock'],['is_active','สถานะ'],['actions','จัดการ']],rows,{
+  is_active:(v,r)=>r.is_placeholder?'รอระบุผู้ขายจริง':v?'เปิดใช้งาน':'ปิดใช้งาน',
+  actions:(_,r)=>`<button data-supplier-view="${esc(r.supplier_id)}">น้ำยา / Stock</button> ${state.user.role==='admin'&&!r.is_placeholder?`<button data-supplier-edit="${esc(r.supplier_id)}">แก้ไข</button>`:''}`
+ });
+ $$('[data-supplier-view]').forEach(button=>button.addEventListener('click',()=>openSupplierDetails(button.dataset.supplierView).catch(e=>toast(e.message,true))));
+ $$('[data-supplier-edit]').forEach(button=>button.addEventListener('click',()=>openSupplierForm(button.dataset.supplierEdit)));
+}
+function openSupplierForm(id){
+ const form=$('#supplierForm');form.reset();form.supplier_id.value='';
+ if(id){const row=state.suppliers.find(s=>s.supplier_id===id);for(const [key,value] of Object.entries(row))if(form.elements.namedItem(key))form.elements.namedItem(key).value=value??'';}
+ $('#supplierDialogTitle').textContent=id?'แก้ไข Supplier':'เพิ่ม Supplier';$('#supplierDialog').showModal();
+}
+async function openSupplierDetails(id){
+ const res=await api('/api/suppliers/'+encodeURIComponent(id));
+ $('#supplierDetailsTitle').textContent=res.supplier.name;
+ $('#supplierDetailsContact').textContent=[res.supplier.contact_name,res.supplier.phone,res.supplier.email,res.supplier.address,res.supplier.note].filter(Boolean).join(' · ');
+ renderTable($('#supplierItemsTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['main_unit','หน่วยหลัก'],['sub_unit','หน่วยตัดจริง'],['is_active','สถานะ'],['actions','จัดการ']],res.items,{is_active:v=>v?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,r)=>`<button data-supplier-item="${esc(r.item_id)}">แก้ไขน้ำยา / Supplier</button>`});
+ renderTable($('#supplierStockTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['quantity','จำนวนคงเหลือ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.stock,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
+ $$('[data-supplier-item]').forEach(button=>button.addEventListener('click',async()=>{try{const res=await api('/api/items');state.items=res.rows;$('#supplierDetailsDialog').close();editItem(button.dataset.supplierItem);}catch(e){toast(e.message,true);}}));
+ $('#supplierDetailsDialog').showModal();
 }

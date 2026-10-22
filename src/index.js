@@ -1,3 +1,4 @@
+import { resolveSupplier, supplierApi } from "./suppliers.js";
 import { analytics, period } from "./analytics.js";
 import QRCode from "qrcode";
 import { stockWorkflow } from "./workflows.js";
@@ -76,6 +77,7 @@ async function api(request, env) {
     return json({ok:true});
   }
   if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
+  if (path === '/suppliers' || path.startsWith('/suppliers/')) return json(await supplierApi(request,env,user,{readBody,logAudit}));
   if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
   if (method === "PUT" && path.startsWith("/items/") && path.endsWith("/active")) return setItemActive(request, env, user, path.split("/")[2]);
@@ -237,22 +239,24 @@ async function machineOptions(env, activeOnly = false) {
 }
 
 async function addItem(request, env, user) {
-  const data = cleanItem(await readBody(request));
+  const body=await readBody(request);
+  const data = {...cleanItem(body),...await resolveSupplier(env,body)};
   const itemId = nextId("ITM");
   await env.DB.prepare(
     `INSERT INTO items
      (item_id, reagent_name, machine, main_unit, sub_unit, sub_per_main, supplier, unit_price, main_unit_price,
-      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, has_sub_unit, is_active, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`
+      lead_time_days, reorder_point_sub, created_at, updated_at, created_by, updated_by, has_sub_unit, supplier_id, is_active, is_deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`
   ).bind(itemId, data.reagent_name, data.machine, data.main_unit, data.sub_unit, data.sub_per_main, data.supplier,
-    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), now(), user.username, user.username, data.has_sub_unit).run();
+    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), now(), user.username, user.username, data.has_sub_unit, data.supplier_id).run();
   await logAudit(env, user.username, "ADD_ITEM", "item", itemId, "SUCCESS", data);
   return json({ ok: true, item_id: itemId });
 }
 
 async function updateItem(request, env, user, itemId) {
   const before = await getExistingItem(env, itemId);
-  const data = cleanItem(await readBody(request));
+  const body=await readBody(request);
+  const data = {...cleanItem(body),...await resolveSupplier(env,body,before.supplier_id)};
   const unitsChanged = data.main_unit !== before.main_unit || data.sub_unit !== before.sub_unit
     || data.sub_per_main !== Number(before.sub_per_main) || data.has_sub_unit !== Number(before.has_sub_unit ?? 1);
   if (unitsChanged) {
@@ -265,16 +269,17 @@ async function updateItem(request, env, user, itemId) {
   }
   await env.DB.prepare(
     `UPDATE items SET reagent_name = ?, machine = ?, main_unit = ?, sub_unit = ?, sub_per_main = ?, supplier = ?,
-      unit_price = ?, main_unit_price = ?, lead_time_days = ?, reorder_point_sub = ?, updated_at = ?, updated_by = ?, has_sub_unit = ?
+      unit_price = ?, main_unit_price = ?, lead_time_days = ?, reorder_point_sub = ?, updated_at = ?, updated_by = ?, has_sub_unit = ?, supplier_id = ?
      WHERE item_id = ? AND is_deleted = 0`
   ).bind(data.reagent_name, data.machine, data.main_unit, data.sub_unit, data.sub_per_main, data.supplier,
-    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), user.username, data.has_sub_unit, itemId).run();
+    data.unit_price, data.main_unit_price, data.lead_time_days, data.reorder_point_sub, now(), user.username, data.has_sub_unit, data.supplier_id, itemId).run();
   await env.DB.prepare(
     `UPDATE stock_units SET reagent_name = ?, machine = ?, sub_unit = ? WHERE item_id = ? AND status = 'IN_STOCK'`
   ).bind(data.reagent_name, data.machine, data.sub_unit, itemId).run();
   await env.DB.prepare(
     `UPDATE package_barcodes SET reagent_name = ?, machine = ?, main_unit = ?, sub_unit = ? WHERE item_id = ? AND status = 'IN_STOCK'`
   ).bind(data.reagent_name, data.machine, data.main_unit, data.sub_unit, itemId).run();
+  if(!before.supplier_id||before.supplier_id==='SUP-UNASSIGNED')await env.DB.prepare("UPDATE stock_units SET supplier_id=? WHERE item_id=? AND (supplier_id='SUP-UNASSIGNED' OR supplier_id IS NULL) AND supplier_verified=0").bind(data.supplier_id,itemId).run();
   await logAudit(env, user.username, "UPDATE_ITEM", "item", itemId, "SUCCESS", { before, after: data });
   return json({ ok: true });
 }
@@ -427,14 +432,14 @@ async function createPurchaseRequisition(request, env, user) {
     if (!itemName) return;
     batch.push(env.DB.prepare(
       `INSERT INTO purchase_requisition_items
-       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source, supplier_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT supplier_id FROM suppliers WHERE name=? COLLATE NOCASE),(SELECT supplier_id FROM items WHERE item_id=? AND ?='')))`
     ).bind(
       nextId("PRI"), prId, String(item.item_id || ""), itemName, String(item.supplier || ""),
       String(item.current_stock || ""), String(item.lot || ""), String(item.expiry || ""),
       Math.max(0, Number(item.order_qty || 0)), String(item.unit || ""),
       canViewPrices(user) ? Number(item.unit_price || 0) : 0,
-      String(item.reason || ""), String(item.source || "")
+      String(item.reason || ""), String(item.source || ""), String(item.supplier||'').trim(), String(item.item_id||''), String(item.supplier||'').trim()
     ));
   });
   if (batch.length < 2) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
@@ -501,14 +506,14 @@ async function updatePurchaseRequisition(request, env, user, prId) {
     if (!itemName) return;
     batch.push(env.DB.prepare(
       `INSERT INTO purchase_requisition_items
-       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source, supplier_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT supplier_id FROM suppliers WHERE name=? COLLATE NOCASE),(SELECT supplier_id FROM items WHERE item_id=? AND ?='')))`
     ).bind(
       nextId("PRI"), prId, String(item.item_id || ""), itemName, String(item.supplier || ""),
       String(item.current_stock || ""), String(item.lot || ""), String(item.expiry || ""),
       Math.max(0, Number(item.order_qty || 0)), String(item.unit || ""),
       canViewPrices(user) ? Number(item.unit_price || 0) : Number(item.unit_price || 0),
-      String(item.reason || ""), String(item.source || "")
+      String(item.reason || ""), String(item.source || ""), String(item.supplier||'').trim(), String(item.item_id||''), String(item.supplier||'').trim()
     ));
   });
   const lineCount=batch.length-3;
@@ -736,6 +741,7 @@ async function exportExcel(env, user, auditOnly) {
   const sheets = auditOnly
     ? { AuditTrail: await tableRows(env, "audit_logs", "ORDER BY timestamp DESC") }
     : {
+        Suppliers: await tableRows(env, "suppliers", "ORDER BY name"),
         Items: await tableRows(env, "items", "ORDER BY reagent_name"),
         StockUnits: await tableRows(env, "stock_units", "ORDER BY received_at DESC"),
         PackageBarcodes: await tableRows(env, "package_barcodes", "ORDER BY received_at DESC"),
@@ -776,7 +782,7 @@ async function backup(env, user) {
     },
   };
   if (canViewPrices(user)) {
-    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals"]) data.tables[table]=await tableRows(env,table);
+    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers"]) data.tables[table]=await tableRows(env,table);
     data.tables.users = await tableRows(env, "users");
     data.tables.audit_logs = await tableRows(env, "audit_logs");
   }
@@ -790,7 +796,7 @@ async function restore(request, env, admin) {
   const body = await readBody(request);
   if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
   const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
-  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals"]) safety.tables[table]=await tableRows(env,table);
+  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers"]) safety.tables[table]=await tableRows(env,table);
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -825,8 +831,18 @@ async function optimize(env, user) {
 }
 
 async function replaceTables(env, tables) {
-  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
-  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
+  if(!tables.suppliers){
+    const stamp=now(),registry=new Map();
+    const add=name=>{const cleaned=String(name||'').trim()==='ยังไม่ระบุ Supplier (ข้อมูลเดิม)'?'':String(name||'').trim(),key=cleaned.toLowerCase();if(!registry.has(key))registry.set(key,{supplier_id:cleaned?crypto.randomUUID():'SUP-UNASSIGNED',name:cleaned||'ยังไม่ระบุ Supplier (ข้อมูลเดิม)',is_placeholder:cleaned?0:1,created_at:stamp,updated_at:stamp});return registry.get(key);};
+    add('');for(const item of tables.items||[]){const vendor=add(item.supplier);item.supplier_id=vendor.supplier_id;item.supplier=vendor.name;}
+    const itemMap=new Map((tables.items||[]).map(i=>[i.item_id,i]));
+    for(const unit of tables.stock_units||[]){unit.supplier_id=itemMap.get(unit.item_id)?.supplier_id||'SUP-UNASSIGNED';unit.supplier_verified=0;}
+    for(const line of tables.purchase_requisition_items||[])line.supplier_id=String(line.supplier||'').trim()?add(line.supplier).supplier_id:itemMap.get(line.item_id)?.supplier_id||null;
+    tables={...tables,suppliers:[...registry.values()]};
+  }
+
+  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","suppliers","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
+  const order = ["suppliers", "items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
   for (const table of order) {
     for (const row of tables[table] || []) {
       const keys = Object.keys(row);

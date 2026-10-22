@@ -39,6 +39,7 @@
       <nav>
         <button class="nav active" data-tab="dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13.5 9.2 8l3.7 3.6L20 4.5"/><path d="M4 19.5h16"/><path d="M5.5 16.5V19"/><path d="M10 13v6"/><path d="M14.5 15v4"/><path d="M19 10.5V19"/></svg></span>Dashboard</button>
         <button class="nav" data-tab="items"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v5.2l-4.4 8A3.2 3.2 0 0 0 8.4 21h7.2a3.2 3.2 0 0 0 2.8-4.8L14 8.2V3"/><path d="M8 15h8"/><path d="M9.5 18h5"/></svg></span>รายการน้ำยา</button>
+        <button class="nav" data-tab="suppliers"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V7l9-4v18M12 9h9v12M1 21h22M6 9h3M6 13h3M6 17h3M16 13h2M16 17h2"/></svg></span>ทะเบียน Supplier</button>
         <button class="nav" data-tab="receive"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="M12 12v8.5"/><path d="m4.5 8 7.5 4 7.5-4"/><path d="M12 3v5.5"/><path d="m9.5 6 2.5 2.5L14.5 6"/></svg></span>รับเข้าคลัง</button>
         <button class="nav" data-tab="reprint"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7V4h10v3"/><path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7z"/><path d="M9 17h6"/></svg></span>พิมพ์ QR ซ้ำ</button>
         <button class="nav" data-tab="consume"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4"/><path d="M14 5h4"/><path d="M6 19h4"/><path d="M14 19h4"/><path d="M5 6v4"/><path d="M19 6v4"/><path d="M5 14v4"/><path d="M19 14v4"/><path d="M8 12h8"/><path d="m13.5 9.5 2.5 2.5-2.5 2.5"/></svg></span>ตัด Stock</button>
@@ -116,6 +117,7 @@
         <dialog id="deliveryTermsDialog" class="form-dialog"><form id="deliveryTermsForm" class="panel stack"><h3>วันที่จัดซื้อ / นัดส่ง</h3><input name="pr_id" type="hidden"><label>วันออก PO<input name="issued_date" type="date" required></label><label>วันนัดส่ง<input name="expected_date" type="date" required></label><button class="primary">บันทึก</button><button type="button" id="closeDeliveryTerms">ยกเลิก</button></form></dialog>
       </section>
 
+      <section id="suppliers" class="tab"><header class="page-head"><div><h2>ทะเบียน Supplier</h2><p class="muted">น้ำยาประจำ Supplier และสต๊อกแยกตามผู้ขายที่รับเข้า</p></div><div class="toolbar"><input id="supplierSearch" placeholder="ค้นหาชื่อ / ผู้ติดต่อ / โทรศัพท์"><button id="supplierSearchBtn">ค้นหา</button><button id="newSupplierBtn" class="primary admin-only">เพิ่ม Supplier</button></div></header><p class="panel">ข้อมูลเดิมที่ไม่มีผู้ขายอยู่ใน “ยังไม่ระบุ Supplier” กรุณาผูกผู้ขายจริงในรายการน้ำยา • สต๊อกเดิมอ้างอิงผู้ขายจากข้อมูลน้ำยา ณ วันย้ายข้อมูล ไม่ใช่หลักฐานการซื้อย้อนหลัง</p><div class="table-wrap"><table id="suppliersTable" class="data-table sortable"></table></div></section>
       <section id="items" class="tab">
         <header class="page-head">
           <div>
@@ -384,6 +386,8 @@
     </section>
   </main>
 
+  <dialog id="supplierDialog" class="form-dialog"><form id="supplierForm" class="grid-form panel"><h3 class="span-2" id="supplierDialogTitle">เพิ่ม Supplier</h3><input name="supplier_id" type="hidden"><label>ชื่อ Supplier<input name="name" maxlength="200" required></label><label>ผู้ติดต่อ<input name="contact_name" maxlength="200"></label><label>โทรศัพท์<input name="phone" maxlength="200"></label><label>อีเมล<input name="email" type="email" maxlength="200"></label><label class="span-2">ที่อยู่<textarea name="address" maxlength="1000"></textarea></label><label class="span-2">หมายเหตุ<textarea name="note" maxlength="1000"></textarea></label><label>สถานะ<select name="is_active"><option value="1">เปิดใช้งาน</option><option value="0">ปิดใช้งาน</option></select></label><button class="primary">บันทึก Supplier</button><button type="button" id="cancelSupplierBtn">ยกเลิก</button></form></dialog>
+  <dialog id="supplierDetailsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="supplierDetailsTitle"></h3><p id="supplierDetailsContact"></p><h4>รายการน้ำยาที่ผูกกับ Supplier นี้</h4><div class="table-wrap"><table id="supplierItemsTable"></table></div><h4>รายการน้ำยาใน Stock ที่มาจาก Supplier นี้</h4><p class="muted">“อ้างอิงข้อมูลเดิม / ตรวจนับ” หมายถึงยังไม่มีหลักฐานรับเข้าที่ระบุผู้ขายโดยตรง การเปลี่ยน Supplier ของน้ำยาจะไม่ย้ายประวัติสต๊อกเดิม</p><div class="table-wrap"><table id="supplierStockTable"></table></div></dialog>
   <dialog id="itemDialog" class="form-dialog">
     <form id="itemForm" class="grid-form form-panel">
       <div class="dialog-head span-2">
@@ -400,7 +404,7 @@
       <label class="span-2 unit-toggle"><span><input type="checkbox" name="has_sub_unit" role="switch"> ใช้หน่วยย่อย</span><small>เปิดเมื่อสินค้ามีหน่วยย่อย เช่น 1 กล่อง = 5 ขวด รายการที่มีประวัติสต๊อกแล้วต้องสร้างรายการใหม่หากต้องการเปลี่ยนหน่วย</small></label>
       <label data-sub-unit-field>หน่วยนับย่อย<input name="sub_unit" placeholder="Test" required></label>
       <label data-sub-unit-field>อัตราแปลง: จำนวนหน่วยย่อยต่อ 1 หน่วยหลัก<input name="sub_per_main" type="number" min="1" value="1" required></label>
-      <label>Supplier<input name="supplier"></label>
+      <label>Supplier<select name="supplier_id" required><option value="">เลือก Supplier จากทะเบียน</option></select><small>เพิ่มผู้ขายได้ที่เมนูทะเบียน Supplier</small></label>
       <label class="price-only" data-sub-unit-field>ราคาต่อหน่วยย่อย<input name="unit_price" type="number" min="0" step="0.01" value="0"></label>
       <label class="price-only">ราคาต่อหน่วยหลัก<input name="main_unit_price" type="number" min="0" step="0.01" value="0"></label>
       <label>Lead time (วัน)<input name="lead_time_days" type="number" min="0" value="0"></label>
