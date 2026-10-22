@@ -64,6 +64,36 @@ export function stockWorkflow(env,user,helpers){
    return {ok:true,rows:rows.results,next_cursor:rows.results.length===100?rows.results.at(-1).created_at+'|'+rows.results.at(-1).operation_id:null};
   },
   async details(id){return {ok:true,rows:(await query('SELECT u.barcode,u.after_status,s.status AS current_status FROM stock_operation_units u LEFT JOIN stock_units s ON s.barcode=u.barcode WHERE u.operation_id=? ORDER BY u.barcode LIMIT 2000',id).all()).results};},
+  async itemLots(params){
+   const item=await query('SELECT item_id,reagent_name,sub_unit,main_unit,is_active FROM items WHERE item_id=? AND is_deleted=0',params.get('item_id')||'').first();
+   if(!item)throw fail('ไม่พบรายการน้ำยา',404);
+   const rows=await query(`SELECT lot,expiry_date,COUNT(*) total,SUM(status='IN_STOCK') in_stock,SUM(status='USED') used,SUM(status='DISPOSED') disposed,SUM(status='ADJUSTED_OUT') adjusted_out,SUM(status='VOID') voided,MIN(received_at) first_received,MAX(received_at) last_received FROM stock_units WHERE item_id=? GROUP BY lot,expiry_date ORDER BY expiry_date,lot`,item.item_id).all();
+   return {ok:true,item,rows:rows.results};
+  },
+  async lotUnits(params){
+   const rows=await query(`SELECT barcode,parent_barcode,reagent_name,machine,sub_unit,lot,expiry_date,status,received_at FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? AND barcode>? ORDER BY barcode LIMIT 201`,params.get('item_id')||'',params.get('lot')||'',params.get('expiry_date')||'',params.get('after')||'').all();
+   return {ok:true,rows:rows.results.slice(0,200),next:rows.results.length>200?rows.results[199].barcode:null};
+  },
+  async editLot(body){
+   admin();const op=await begin(body,'LOT_EDIT');if(op.replay)return op.replay;
+   const itemId=String(body.item_id||''),oldLot=String(body.lot||''),oldExpiry=date(body.expiry_date),newLot=String(body.new_lot||'').trim(),newExpiry=date(body.new_expiry_date),why=reason(body.reason);
+   if(!newLot||newLot.length>100)throw fail('ระบุ Lot ไม่เกิน 100 ตัวอักษร');
+   if(newLot===oldLot&&newExpiry===oldExpiry)throw fail('ยังไม่มีการเปลี่ยนแปลง Lot หรือวันหมดอายุ');
+   const units=(await query('SELECT * FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? ORDER BY barcode LIMIT 2001',itemId,oldLot,oldExpiry).all()).results;
+   if(!units.length||units.length>2000||units.some(u=>u.status!=='IN_STOCK'))throw fail('แก้ไขได้เฉพาะ Lot ที่ยังอยู่ในคลังครบทุกหน่วย และไม่เกิน 2000 หน่วย เพื่อรักษาประวัติการใช้งาน',409);
+   if(await query('SELECT 1 present FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? LIMIT 1',itemId,newLot,newExpiry).first())throw fail('มี Lot และวันหมดอายุปลายทางนี้อยู่แล้ว ไม่สามารถรวม Lot โดยการแก้ไขได้',409);
+   if(units.length!==Number(body.expected_count))throw fail('ยอด Lot เปลี่ยนไป กรุณารีเฟรชก่อนแก้ไข',409);
+   const signature=units.map(u=>u.barcode+':'+(u.last_operation||'')).join('|');
+   const lotSignature=`SELECT COALESCE(group_concat(barcode||':'||last_operation,'|'),'') FROM (SELECT barcode,last_operation FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? ORDER BY barcode)`;
+   const batch=[guard(op.id,`(${lotSignature})=?`,itemId,oldLot,oldExpiry,signature),guard(op.id,"NOT EXISTS(SELECT 1 FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? AND status<>'IN_STOCK')",itemId,oldLot,oldExpiry),guard(op.id,'NOT EXISTS(SELECT 1 FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=?)',itemId,newLot,newExpiry)];
+   for(const unit of units)batch.push(remember(op.id,unit,'IN_STOCK'));
+   for(const parent of new Set(units.map(u=>u.parent_barcode).filter(Boolean))){
+    batch.push(guard(op.id,"NOT EXISTS(SELECT 1 FROM stock_units WHERE parent_barcode=? AND (item_id<>? OR lot<>? OR expiry_date<>? OR status<>'IN_STOCK'))",parent,itemId,oldLot,oldExpiry));
+    batch.push(query('UPDATE package_barcodes SET lot=?,expiry_date=? WHERE package_barcode=?',newLot,newExpiry,parent));
+   }
+   batch.push(query('UPDATE stock_units SET lot=?,expiry_date=?,last_operation=? WHERE item_id=? AND lot=? AND expiry_date=?',newLot,newExpiry,op.id,itemId,oldLot,oldExpiry));
+   return commit(op,body,batch,{item_id:itemId,old_lot:oldLot,old_expiry:oldExpiry,lot:newLot,expiry_date:newExpiry,updated_units:units.length},{itemId,reason:why,old_lot:oldLot,old_expiry:oldExpiry,new_lot:newLot,new_expiry:newExpiry});
+  },
   async receive(body){
    const op=await begin(body,'RECEIVE');if(op.replay)return op.replay;
    const item=await activeItem(body.item_id), qty=integer(body.quantity,'จำนวน'), lot=String(body.lot||'').trim(),expiry=date(body.expiry_date);

@@ -52,6 +52,9 @@ async function api(request, env) {
   if (method === "POST" && /^\/operations\/[^/]+\/reverse$/.test(path)) return json(await flow.reverse(await readBody(request),path.split('/')[2]));
   if (method === "GET" && path === "/pr-receiving") return json({ok:true,rows:(await env.DB.prepare("SELECT l.line_id,l.item_id,l.item_name,l.unit,l.order_qty,l.received_qty,p.pr_no,p.pr_id FROM purchase_requisition_items l JOIN purchase_requisitions p ON p.pr_id=l.pr_id WHERE p.status='APPROVED' AND l.received_qty<l.order_qty ORDER BY p.created_at DESC LIMIT 500").all()).results});
   if (method === "GET" && path === "/stock-counts") return json(await flow.counts());
+  if(method==='GET'&&path==='/item-lots')return json(await flow.itemLots(url.searchParams));
+  if(method==='GET'&&path==='/item-lots/units')return json(await flow.lotUnits(url.searchParams));
+  if(method==='POST'&&path==='/item-lots/edit')return json(await flow.editLot(await readBody(request)));
   if (method === "GET" && path === "/stock-counts/lots") return json(await flow.lots(url.searchParams.get('item_id')||''));
   if (method === "POST" && path === "/stock-counts") return json(await flow.createCount(await readBody(request)));
   if (method === "POST" && /^\/stock-counts\/[^/]+\/approve$/.test(path)) return json(await flow.approveCount(await readBody(request),path.split('/')[2]));

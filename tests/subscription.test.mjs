@@ -355,3 +355,29 @@ test('supplier migration backfills populated legacy tables without inventing unk
  assert.equal((await database.prepare('PRAGMA foreign_key_check').all()).results.length,0);
  }finally{await legacy.dispose();}
 });
+
+test('lot management preserves QR and package identity, guards history and stale counts',async()=>{
+ const cookie=await wfAuth(),vendor=await aDb.prepare('SELECT supplier_id FROM suppliers WHERE is_placeholder=0 AND is_active=1 LIMIT 1').first();
+ const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{supplier_id:vendor.supplier_id,reagent_name:'Lot management',main_unit:'กล่อง',has_sub_unit:1,sub_unit:'ขวด',sub_per_main:2}})).data.item_id;
+ const receipt=await wfPost('/api/receive',{item_id:item,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'ORIGINAL',expiry_date:'2028-01-01'},cookie);assert.equal(receipt.status,200);
+ await wfPost('/api/receive',{item_id:item,quantity:1,lot:'EXISTING',expiry_date:'2028-01-01'},cookie);
+ const count=await wfPost('/api/stock-counts',{item_id:item,lot:'ORIGINAL',expiry_date:'2028-01-01',counted_qty:4,reason:'Before lot edit'},cookie);
+ const original=(await aDb.prepare("SELECT barcode,parent_barcode,supplier_id FROM stock_units WHERE item_id=? AND lot='ORIGINAL' ORDER BY barcode").bind(item).all()).results;
+ const body={item_id:item,lot:'ORIGINAL',expiry_date:'2028-01-01',new_lot:'CORRECTED',new_expiry_date:'2028-02-01',expected_count:4,reason:'Correct received lot',request_id:randomUUID()};
+ assert.equal((await wfPost('/api/item-lots/edit',{...body,new_lot:'EXISTING',new_expiry_date:'2028-01-01',request_id:randomUUID()},cookie)).status,409);
+ assert.equal((await wfPost('/api/item-lots/edit',{...body,expected_count:3,request_id:randomUUID()},cookie)).status,409);
+ const edited=await wfPost('/api/item-lots/edit',body,cookie);assert.equal(edited.status,200,JSON.stringify(edited.data));assert.equal(edited.data.updated_units,4);
+ const replay=await wfPost('/api/item-lots/edit',body,cookie);assert.equal(replay.status,200);assert.equal(replay.data.operation_id,edited.data.operation_id);
+ assert.deepEqual((await aDb.prepare("SELECT barcode,parent_barcode,supplier_id FROM stock_units WHERE item_id=? AND lot='CORRECTED' ORDER BY barcode").bind(item).all()).results,original);
+ assert.equal((await aDb.prepare('SELECT lot,expiry_date FROM package_barcodes WHERE package_barcode=?').bind(original[0].parent_barcode).first()).lot,'CORRECTED');
+ assert.equal((await wfPost('/api/stock-counts/'+count.data.count_id+'/approve',{},cookie)).status,409);
+ assert.equal((await wfPost('/api/operations/'+receipt.data.operation_id+'/reverse',{reason:'Cannot reverse after edit'},cookie)).status,409);
+ const list=await tenantRequest('tenant-a','/api/item-lots?item_id='+item,{cookie});assert.equal(list.status,200);assert.ok(list.data.rows.some(r=>r.lot==='CORRECTED'&&r.in_stock===4));
+ const units=await tenantRequest('tenant-a','/api/item-lots/units?'+new URLSearchParams({item_id:item,lot:'CORRECTED',expiry_date:'2028-02-01'}),{cookie});assert.equal(units.data.rows.length,4);
+ await wfPost('/api/consume',{barcode:original[0].barcode,confirm_fefo:true},cookie);
+ assert.equal((await wfPost('/api/item-lots/edit',{...body,lot:'CORRECTED',expiry_date:'2028-02-01',new_lot:'FORBIDDEN',request_id:randomUUID()},cookie)).status,409);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await wfPost('/api/item-lots/edit',{...body,request_id:randomUUID()},staff)).status,403);
+ const otherCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-b','/api/item-lots?item_id='+item,{cookie:otherCookie})).status,404);
+});

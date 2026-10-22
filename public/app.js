@@ -147,6 +147,9 @@ function bindUi() {
   $("#restoreForm").addEventListener("submit", restoreBackup);
   $("#clearForm").addEventListener("submit", clearDatabase);
   $("#optimizeBtn").addEventListener("click", optimizeDb);
+  $('#cancelEditLotBtn').addEventListener('click',()=>$('#editLotDialog').close());
+  $('#moreLotUnitsBtn').addEventListener('click',()=>loadLotUnits(true).catch(e=>toast(e.message,true)));
+  $('#editLotForm').addEventListener('submit',async event=>{event.preventDefault();try{const old=state.managedLot,body={...formData(event.target),item_id:state.managedLotItem,lot:old.lot,expiry_date:old.expiry_date,expected_count:old.total};await stockWrite('/api/item-lots/edit',body);$('#editLotDialog').close();await openItemLots(state.managedLotItem);['dashboard','reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));await refreshStock();toast('แก้ไข Lot แล้ว กรุณาพิมพ์ฉลากใหม่');}catch(e){toast(e.message,true);}});
   $('#supplierSearchBtn').addEventListener('click',()=>refreshSuppliers().catch(e=>toast(e.message,true)));
   $('#supplierSearch').addEventListener('keydown',enter(refreshSuppliers));
   $('#newSupplierBtn').addEventListener('click',()=>openSupplierForm());
@@ -373,10 +376,11 @@ async function refreshItems() {
     main_unit_price: money,
     actions: (_, item) => {
       const active = Number(item.is_active ?? 1) === 1;
-      return `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button data-toggle-item="${item.item_id}" class="${active ? "warning" : "primary"}">${active ? "Inactive" : "Active"}</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`;
+      return `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button data-item-lots="${esc(item.item_id)}">จัดการ Lot</button><button data-toggle-item="${item.item_id}" class="${active ? "warning" : "primary"}">${active ? "Inactive" : "Active"}</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`;
     },
   });
   $$("[data-edit-item]").forEach((btn) => btn.addEventListener("click", () => editItem(btn.dataset.editItem)));
+  $$('[data-item-lots]').forEach(button=>button.addEventListener('click',()=>openItemLots(button.dataset.itemLots).catch(e=>toast(e.message,true))));
   $$("[data-toggle-item]").forEach((btn) => btn.addEventListener("click", () => toggleItemActive(btn.dataset.toggleItem)));
   $$("[data-delete-item]").forEach((btn) => btn.addEventListener("click", () => deleteItem(btn.dataset.deleteItem)));
 }
@@ -1613,7 +1617,7 @@ function showWorkflowLabels(labels){
  const panel=$('#workflowLabels');
  if(panel){panel.hidden=!labels.length;}
 }
-function workflowTypeLabel(kind){return ({RECEIVE:'รับเข้า',CONSUME:'นำไปใช้',DISPOSE:'ตัดทิ้ง',ADJUSTMENT:'ปรับยอด',COUNT_DRAFT:'บันทึกผลนับ',REVERSAL:'กลับรายการ',REVERSAL_RECEIVE:'กลับการรับเข้า',REVERSAL_CONSUME:'คืนจากการใช้',REVERSAL_DISPOSE:'คืนจากการตัดทิ้ง',REVERSAL_ADJUSTMENT:'กลับการปรับยอด'})[kind]||kind;}
+function workflowTypeLabel(kind){return ({RECEIVE:'รับเข้า',CONSUME:'นำไปใช้',DISPOSE:'ตัดทิ้ง',ADJUSTMENT:'ปรับยอด',COUNT_DRAFT:'บันทึกผลนับ',REVERSAL:'กลับรายการ',LOT_EDIT:'แก้ไขข้อมูล Lot',REVERSAL_RECEIVE:'กลับการรับเข้า',REVERSAL_CONSUME:'คืนจากการใช้',REVERSAL_DISPOSE:'คืนจากการตัดทิ้ง',REVERSAL_ADJUSTMENT:'กลับการปรับยอด'})[kind]||kind;}
 function showScanResult(result,target){
  const row={barcode:result.barcode,item:result.item_name||target.reagent_name,lot:result.lot||target.lot,quantity:result.consumed,unit:result.unit||target.sub_unit||'',time:Date.now(),kind:result.kind||'CONSUME'};
  if(!workflowUi.recent.some(r=>r.operation_id===result.operation_id))workflowUi.recent.unshift({...row,operation_id:result.operation_id});
@@ -1810,4 +1814,25 @@ async function openSupplierDetails(id){
  renderTable($('#supplierStockTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['quantity','จำนวนคงเหลือ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.stock,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
  $$('[data-supplier-item]').forEach(button=>button.addEventListener('click',async()=>{try{const res=await api('/api/items');state.items=res.rows;$('#supplierDetailsDialog').close();editItem(button.dataset.supplierItem);}catch(e){toast(e.message,true);}}));
  $('#supplierDetailsDialog').showModal();
+}
+
+async function openItemLots(itemId){
+ const res=await api('/api/item-lots?item_id='+encodeURIComponent(itemId));state.managedLotItem=itemId;state.managedLots=res.rows;
+ $('#itemLotsTitle').textContent=`จัดการ Lot: ${res.item.reagent_name} (${res.item.sub_unit||res.item.main_unit})`;
+ renderTable($('#itemLotsTable'),[['lot','Lot'],['expiry_date','หมดอายุ'],['in_stock','คงเหลือ'],['used','ใช้แล้ว'],['disposed','ตัดทิ้ง'],['adjusted_out','ปรับออก'],['voided','ยกเลิก'],['total','หน่วยทั้งหมด'],['first_received','รับครั้งแรก'],['actions','จัดการ']],res.rows,{
+  first_received:v=>esc(formatDateTime(v)),
+  actions:(_,row)=>{const index=res.rows.indexOf(row);return `<button data-lot-units="${index}">ดู QR / พิมพ์</button>${row.in_stock&&res.item.is_active?`<button data-lot-count="${index}">ตรวจนับ</button>`:''}${state.user.role==='admin'&&row.in_stock===row.total&&row.total<=2000?`<button data-lot-edit="${index}">แก้ไข Lot / หมดอายุ</button>`:''}`;}
+ });
+ $$('[data-lot-units]').forEach(button=>button.addEventListener('click',async()=>{try{state.managedLot=res.rows[Number(button.dataset.lotUnits)];await loadLotUnits();$('#lotUnitsDialog').showModal();}catch(e){toast(e.message,true);}}));
+ $$('[data-lot-edit]').forEach(button=>button.addEventListener('click',()=>{const row=res.rows[Number(button.dataset.lotEdit)];state.managedLot=row;const form=$('#editLotForm');form.reset();form.new_lot.value=row.lot;form.new_expiry_date.value=row.expiry_date;$('#editLotDialog').showModal();}));
+ $$('[data-lot-count]').forEach(button=>button.addEventListener('click',async()=>{try{const row=res.rows[Number(button.dataset.lotCount)];$('#itemLotsDialog').close();switchTab('counts');await refreshCounts();const form=$('#countForm');form.item_id.value=itemId;$('#countItemSearch').value=countItemLabel(res.item); // Use the full item below when available.
+ const item=state.items.find(i=>i.item_id===itemId);if(item)$('#countItemSearch').value=countItemLabel(item);
+ await refreshCountLots();const option=[...$('#countLotSelect').options].find(o=>o.dataset.lot===row.lot&&o.dataset.expiry===row.expiry_date);if(option)$('#countLotSelect').value=option.value;form.lot.value=row.lot;form.expiry_date.value=row.expiry_date;form.counted_qty.value='';form.reason.value='';form.counted_qty.focus();}catch(e){toast(e.message,true);}}));
+ if(!$('#itemLotsDialog').open)$('#itemLotsDialog').showModal();
+}
+async function loadLotUnits(append=false){
+ const row=state.managedLot,params=new URLSearchParams({item_id:state.managedLotItem,lot:row.lot,expiry_date:row.expiry_date,after:append?state.lotUnitsNext||'':''});
+ const res=await api('/api/item-lots/units?'+params);state.lotUnitRows=append?[...state.lotUnitRows,...res.rows]:res.rows;state.lotUnitsNext=res.next;$('#moreLotUnitsBtn').hidden=!res.next;
+ renderTable($('#lotUnitsTable'),[['barcode','QR'],['parent_barcode','QR หน่วยหลัก'],['lot','Lot'],['expiry_date','หมดอายุ'],['status','สถานะ'],['received_at','รับเข้า'],['actions','พิมพ์']],state.lotUnitRows,{actions:(_,r)=>r.status==='IN_STOCK'?`<button data-print-lot-qr="${esc(r.barcode)}">พิมพ์ฉลาก</button>`:''});
+ $$('[data-print-lot-qr]').forEach(button=>button.addEventListener('click',()=>printLabels([stockRowToLabel(state.lotUnitRows.find(r=>r.barcode===button.dataset.printLotQr))])));
 }

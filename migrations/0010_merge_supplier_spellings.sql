@@ -1,4 +1,4 @@
--- Merge spelling variants requested by the owner; preserve canonical supplier IDs.
+-- Merge spelling variants requested by the owner and preserve canonical supplier IDs.
 
 INSERT INTO audit_logs(audit_id,timestamp,username,action,target_type,target_id,result,details)
 SELECT 'AUD-'||lower(hex(randomblob(16))),datetime('now'),'system','MERGE_SUPPLIER','supplier',(SELECT supplier_id FROM suppliers WHERE name='Z-Medic' COLLATE NOCASE),'SUCCESS',json_object('source_id',supplier_id,'source_name',name,'target_name','Z-Medic','contact_name',contact_name,'phone',phone,'email',email,'address',address,'note',note)
