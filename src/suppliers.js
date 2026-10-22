@@ -8,7 +8,7 @@ export async function resolveSupplier(env,body,previous=null){
 export async function supplierApi(request,env,user,helpers){
  const url=new URL(request.url),path=url.pathname,method=request.method;
  if(method==='GET'&&path==='/api/suppliers'){
-  if(url.searchParams.get('master')==='1')return {ok:true,rows:(await env.DB.prepare('SELECT supplier_id,name,is_active,is_placeholder FROM suppliers ORDER BY is_placeholder DESC,is_active DESC,name').all()).results};
+  if(url.searchParams.get('master')==='1')return {ok:true,rows:(await env.DB.prepare('SELECT * FROM suppliers ORDER BY is_placeholder DESC,is_active DESC,name').all()).results};
   const q='%'+(url.searchParams.get('q')||'').trim()+'%';
   const rows=await env.DB.prepare(`SELECT v.*,COALESCE(i.item_count,0) item_count,COALESCE(s.stock_items,0) stock_items,COALESCE(s.stock_lots,0) stock_lots FROM suppliers v LEFT JOIN (SELECT supplier_id,COUNT(*) item_count FROM items WHERE is_deleted=0 GROUP BY supplier_id) i ON i.supplier_id=v.supplier_id LEFT JOIN (SELECT supplier_id,COUNT(DISTINCT item_id) stock_items,COUNT(DISTINCT item_id||char(0)||lot||char(0)||expiry_date) stock_lots FROM stock_units WHERE status='IN_STOCK' GROUP BY supplier_id) s ON s.supplier_id=v.supplier_id WHERE v.name LIKE ? OR v.contact_name LIKE ? OR v.phone LIKE ? ORDER BY v.is_placeholder DESC,v.is_active DESC,v.name`).bind(q,q,q).all();
   return {ok:true,rows:rows.results};
