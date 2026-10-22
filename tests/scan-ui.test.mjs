@@ -10,6 +10,7 @@ test('scan updates only the affected row and defers hidden views',async()=>{
  c.calls=calls;
  vm.runInContext(`state.stock=[{barcode:'BOX',quantity_sub:5},{barcode:'OTHER',quantity_sub:7}];
  api=async(path)=>{ calls.push(path);return path.endsWith('/preview')?{target:{is_package:true,quantity_sub:5},warnings:[]}:{barcode:'BOX',remaining_sub:3}; };
+ stockWrite=async(path,body)=>api(path,{method:"POST",body});showScanResult=()=>{};
  renderStock=()=>{};toast=()=>{};
  refreshDashboard=async()=>calls.push('dashboard');`,c);
  await vm.runInContext("consume({barcode:'BOX',package_quantity:2})",c);
@@ -20,4 +21,38 @@ test('scan updates only the affected row and defers hidden views',async()=>{
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(calls.at(-1),'dashboard');const count=calls.length;
  vm.runInContext("switchTab('dashboard')",c);assert.equal(calls.length,count);
+});
+
+async function workflowContext(){
+ const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace('boot();','');
+ const cache=new Map(),elements=new Map();
+ const context=vm.createContext({console,setTimeout,clearTimeout,window:{addEventListener(){}},location:{hash:''},crypto:{randomUUID:()=>`request-${Math.random()}`},localStorage:{getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v),removeItem:k=>cache.delete(k)},document:{querySelector:selector=>{if(!elements.has(selector))elements.set(selector,{classList:{toggle(){},remove(){}},textContent:'',innerHTML:''});return elements.get(selector);},querySelectorAll:()=>[]}});
+ vm.runInContext(source,context);vm.runInContext("state.user={username:'test-user',role:'staff'};refreshAll=async()=>{};toast=()=>{};",context);
+ return {context,cache};
+}
+test('lost stock response is recovered by request ID without submitting a new write',async()=>{
+ const {context}=await workflowContext();context.requests=[];
+ vm.runInContext(`api=async(path,opts)=>{requests.push({path,opts});if(path==='/api/receive')throw new Error('connection lost after commit');return {found:true,result:{ok:true,operation_id:'confirmed'}};};`,context);
+ const result=await vm.runInContext("stockWrite('/api/receive',{item_id:'a',quantity:2})",context);
+ assert.equal(result.operation_id,'confirmed');assert.equal(result.replayed,true);
+ assert.equal(context.requests.length,2);assert.ok(context.requests[1].path.includes(context.requests[0].opts.body.request_id));
+ assert.equal(vm.runInContext('readPendingStockWrite()',context),null);
+});
+test('uncertain writes persist and retry the exact same command; new writes are blocked',async()=>{
+ const {context}=await workflowContext();context.requests=[];
+ vm.runInContext(`api=async(path,opts)=>{requests.push({path,opts});if(path.startsWith('/api/operations/status'))return {found:false};throw new Error('offline');};`,context);
+ await assert.rejects(vm.runInContext("stockWrite('/api/receive',{item_id:'a',quantity:2})",context),/ยืนยันผล/);
+ const pending=vm.runInContext('readPendingStockWrite()',context);assert.ok(pending.body.request_id);
+ await assert.rejects(vm.runInContext("stockWrite('/api/receive',{item_id:'a',quantity:2})",context),/ยังไม่ยืนยัน/);
+ vm.runInContext(`api=async(path,opts)=>{requests.push({path,opts});return {ok:true,operation_id:'replayed'};};`,context);
+ await vm.runInContext('sendPendingStockWrite(readPendingStockWrite())',context);
+ const sent=context.requests.filter(r=>r.path==='/api/receive');assert.equal(sent.length,2);
+ assert.equal(JSON.stringify(sent[0].opts.body),JSON.stringify(sent[1].opts.body));
+ assert.equal(vm.runInContext('readPendingStockWrite()',context),null);
+});
+test('validation failure clears a pending key and does not leave the scanner locked',async()=>{
+ const {context}=await workflowContext();vm.runInContext("api=async()=>{throw Object.assign(new Error('invalid'),{status:400});};",context);
+ await assert.rejects(vm.runInContext("stockWrite('/api/receive',{quantity:0})",context),/invalid/);
+ assert.equal(vm.runInContext('readPendingStockWrite()',context),null);
+ assert.equal(vm.runInContext('workflowUi.busy',context),false);
 });

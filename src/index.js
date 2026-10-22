@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { stockWorkflow } from "./workflows.js";
 import { subscriptionGate, tenantSetup } from "./subscription.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -42,6 +43,16 @@ async function api(request, env) {
   if (method === "POST" && path === "/logout") return logout(env, request);
 
   const user = await requireUser(request, env);
+  const flow = workflows(env,user);
+  if (method === "GET" && path === "/operations/status") return json(await flow.status(request));
+  if (method === "GET" && /^\/operations\/[^/]+\/units$/.test(path)) return json(await flow.details(path.split('/')[2]));
+  if (method === "GET" && path === "/operations") return json(await flow.history(request));
+  if (method === "POST" && /^\/operations\/[^/]+\/reverse$/.test(path)) return json(await flow.reverse(await readBody(request),path.split('/')[2]));
+  if (method === "GET" && path === "/pr-receiving") return json({ok:true,rows:(await env.DB.prepare("SELECT l.line_id,l.item_id,l.item_name,l.unit,l.order_qty,l.received_qty,p.pr_no,p.pr_id FROM purchase_requisition_items l JOIN purchase_requisitions p ON p.pr_id=l.pr_id WHERE p.status='APPROVED' AND l.received_qty<l.order_qty ORDER BY p.created_at DESC LIMIT 500").all()).results});
+  if (method === "GET" && path === "/stock-counts") return json(await flow.counts());
+  if (method === "GET" && path === "/stock-counts/lots") return json(await flow.lots(url.searchParams.get('item_id')||''));
+  if (method === "POST" && path === "/stock-counts") return json(await flow.createCount(await readBody(request)));
+  if (method === "POST" && /^\/stock-counts\/[^/]+\/approve$/.test(path)) return json(await flow.approveCount(await readBody(request),path.split('/')[2]));
   if (method === "GET" && path === "/me") return json({ ok: true, user: publicUser(user) });
   if (method === "PUT" && path === "/me/password") return changeOwnPassword(request, env, user);
   if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
@@ -301,52 +312,7 @@ async function availableStock(request, env) {
 }
 
 async function receiveStock(request, env, user) {
-  const body = await readBody(request);
-  const item = await getActiveItem(env, body.item_id);
-  const quantity = int(body.quantity, 1);
-  const lot = String(body.lot || "").trim();
-  const expiry = String(body.expiry_date || "").trim();
-  if (!lot || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw httpError("กรุณาระบุ Lot และวันหมดอายุ");
-  const unitMode = Number(item.has_sub_unit ?? 1) === 0 ? "main" : body.unit_mode === "main" ? "main" : "sub";
-  const stickerMode = Number(item.has_sub_unit ?? 1) === 0 ? "sub" : body.sticker_mode === "main" ? "main" : "sub";
-  const subPerMain = Math.max(1, Number(item.sub_per_main || 1));
-  const totalSub = unitMode === "main" ? quantity * subPerMain : quantity;
-  const created = [];
-  const batch = [];
-
-  if (stickerMode === "main") {
-    const packageCount = unitMode === "main" ? quantity : Math.ceil(totalSub / subPerMain);
-    let remaining = totalSub;
-    for (let i = 0; i < packageCount; i++) {
-      const packageCode = nextQr();
-      const count = Math.min(subPerMain, remaining);
-      remaining -= count;
-      created.push({ code: packageCode, type: "main", sub_count: count, item, lot, expiry });
-      batch.push(env.DB.prepare(
-        `INSERT INTO package_barcodes (package_barcode, item_id, reagent_name, lot, expiry_date, machine, main_unit, sub_unit,
-          sub_count, status, received_at, note, received_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_STOCK', ?, ?, ?)`
-      ).bind(packageCode, item.item_id, item.reagent_name, lot, expiry, item.machine, item.main_unit, item.sub_unit, count, now(), String(body.note || ""), user.username));
-      for (let j = 0; j < count; j++) {
-        const code = nextQr();
-        batch.push(insertStockUnit(env, code, item, lot, expiry, String(body.note || ""), user.username, packageCode));
-      }
-    }
-  } else {
-    for (let i = 0; i < totalSub; i++) {
-      const code = nextQr();
-      created.push({ code, type: "sub", sub_count: 1, item, lot, expiry });
-      batch.push(insertStockUnit(env, code, item, lot, expiry, String(body.note || ""), user.username, ""));
-    }
-  }
-
-  batch.push(env.DB.prepare(
-    `INSERT INTO movements (movement_id, timestamp, type, barcode, item_id, reagent_name, lot, quantity_sub, operator_note, operator_username)
-     VALUES (?, ?, 'RECEIVE', ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(nextId("MOV"), now(), created.map((x) => x.code).join(","), item.item_id, item.reagent_name, lot, totalSub, String(body.note || ""), user.username));
-  await env.DB.batch(batch);
-  await logAudit(env, user.username, "RECEIVE_STOCK", "stock", item.item_id, "SUCCESS", { barcodes: created.map((x) => x.code), total_sub: totalSub });
-  return json({ ok: true, labels: created, total_sub: totalSub });
+ return json(await workflows(env,user).receive(await readBody(request)));
 }
 
 function insertStockUnit(env, code, item, lot, expiry, note, username, parent) {
@@ -367,88 +333,43 @@ async function consumePreview(request, env) {
 }
 
 async function consumeStock(request, env, user) {
-  const body = await readBody(request);
-  const inputBarcode = String(body.barcode || "").trim();
-  if (!inputBarcode) throw httpError("กรุณาระบุ QR code");
-  const target = await findStockTarget(env, inputBarcode);
-  const barcode = target.barcode;
-  const requestedQty = target.is_package ? int(body.package_quantity, target.quantity_sub) : 1;
-  const warnings = await fefoWarnings(env, target, requestedQty);
-  if (warnings.length && !body.confirm_fefo) {
-    return json({ ok: false, need_fefo_confirm: true, target, warnings }, 409);
-  }
-  if (warnings.length) {
-    await logAudit(env, user.username, "FEFO_OVERRIDE", "stock", barcode, "SUCCESS", warnings);
-  }
-
-  const note = String(body.note || "");
-  if (target.is_package) {
-    const children = await env.DB.prepare(
-      `SELECT barcode FROM stock_units WHERE parent_barcode = ? AND status = 'IN_STOCK' ORDER BY expiry_date, received_at, barcode LIMIT ?`
-    ).bind(barcode, requestedQty).all();
-    if ((children.results || []).length < requestedQty) throw httpError("จำนวนย่อยในหน่วยหลักไม่พอ");
-    const codes = children.results.map((row) => row.barcode);
-    const marks = codes.map((code) => env.DB.prepare("UPDATE stock_units SET status = 'USED', used_at = ?, note = ?, used_by = ? WHERE barcode = ?").bind(now(), note, user.username, code));
-    marks.push(env.DB.prepare(
-      `INSERT INTO movements (movement_id, timestamp, type, barcode, item_id, reagent_name, lot, quantity_sub, operator_note, operator_username)
-       VALUES (?, ?, 'CONSUME', ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(nextId("MOV"), now(), barcode, target.item_id, target.reagent_name, target.lot, requestedQty, note, user.username));
-    const left = Number(target.quantity_sub) - requestedQty;
-    if (left <= 0) {
-      marks.push(env.DB.prepare("UPDATE package_barcodes SET status = 'USED', used_at = ?, note = ?, used_by = ? WHERE package_barcode = ?").bind(now(), note, user.username, barcode));
-    } else {
-      marks.push(env.DB.prepare("UPDATE package_barcodes SET note = ? WHERE package_barcode = ?").bind(note, barcode));
-    }
-    await env.DB.batch(marks);
-  } else {
-    await env.DB.batch([
-      env.DB.prepare("UPDATE stock_units SET status = 'USED', used_at = ?, note = ?, used_by = ? WHERE barcode = ? AND status = 'IN_STOCK'").bind(now(), note, user.username, barcode),
-      env.DB.prepare(
-        `INSERT INTO movements (movement_id, timestamp, type, barcode, item_id, reagent_name, lot, quantity_sub, operator_note, operator_username)
-         VALUES (?, ?, 'CONSUME', ?, ?, ?, ?, 1, ?, ?)`
-      ).bind(nextId("MOV"), now(), barcode, target.item_id, target.reagent_name, target.lot, note, user.username),
-    ]);
-  }
-  await logAudit(env, user.username, "CONSUME_STOCK", "stock", barcode, "SUCCESS", { quantity_sub: requestedQty, note });
-  const parentBarcode = target.is_package ? "" : target.parent_barcode;
-  const remaining = parentBarcode
-    ? await env.DB.prepare("SELECT COUNT(*) AS qty FROM stock_units WHERE parent_barcode = ? AND status = 'IN_STOCK'").bind(parentBarcode).first()
-    : null;
-  return json({ ok: true, consumed: requestedQty, barcode: target.barcode,
-    parent_barcode: parentBarcode || "", remaining_sub: target.is_package
-      ? Number(target.quantity_sub) - requestedQty : Number(remaining?.qty || 0) });
+ return json(await workflows(env,user).consume(await readBody(request)));
 }
 
 async function movementReport(request, env, user) {
   const url = new URL(request.url);
-  const reportType = url.searchParams.get("type") === "consume" ? "consume" : "receive";
+  const requestedType=url.searchParams.get("type");
+  const reportType=["receive","consume","dispose","adjustment","all"].includes(requestedType)?requestedType:"receive";
   const today = dateOnly(new Date());
   const from = validDate(url.searchParams.get("from")) || today;
   const to = validDate(url.searchParams.get("to")) || from;
   const start = from <= to ? from : to;
   const end = from <= to ? to : from;
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
-  const typeSql = reportType === "receive" ? "type = 'RECEIVE'" : "type IN ('CONSUME', 'CONSUME_PACKAGE')";
+  const typeSql = {receive:"m.type='RECEIVE'",consume:"m.type IN ('CONSUME','CONSUME_PACKAGE')",dispose:"m.type='DISPOSE'",adjustment:"m.type='ADJUSTMENT'",all:"1=1"}[reportType];
   const rows = await env.DB.prepare(
-    `SELECT movement_id, timestamp, type, barcode, item_id, reagent_name, lot,
-            ABS(quantity_sub) AS quantity_sub, operator_note, operator_username
-     FROM movements
+    `SELECT m.*,COALESCE(NULLIF(m.unit,''),i.sub_unit,i.main_unit,'') AS display_unit,
+            COALESCE(o.reversed_by,'') AS reversed_by
+     FROM movements m LEFT JOIN items i ON i.item_id=m.item_id
+     LEFT JOIN stock_operations o ON o.operation_id=m.movement_id
      WHERE ${typeSql}
-       AND date(timestamp) BETWEEN ? AND ?
-       AND (? = '%%' OR lower(reagent_name) LIKE ? OR lower(lot) LIKE ? OR lower(barcode) LIKE ? OR lower(operator_username) LIKE ?)
-     ORDER BY timestamp DESC
+       AND date(m.timestamp) BETWEEN ? AND ?
+       AND (? = '%%' OR lower(m.reagent_name) LIKE ? OR lower(m.lot) LIKE ? OR lower(m.barcode) LIKE ? OR lower(m.operator_username) LIKE ?)
+     ORDER BY m.timestamp DESC
      LIMIT 2000`
   ).bind(start, end, q, q, q, q, q).all();
   const data = rows.results || [];
-  const totalQty = data.reduce((sum, row) => sum + Number(row.quantity_sub || 0), 0);
+  const totalsByUnit = {};
+  for (const row of data) if (!row.reversed_by && !row.type.startsWith('REVERSAL_')) totalsByUnit[row.display_unit]=(totalsByUnit[row.display_unit]||0)+Number(row.quantity_sub||0)*(reportType==='all'&&['CONSUME','CONSUME_PACKAGE','DISPOSE'].includes(row.type)?-1:1);
+  const totalQty = Object.values(totalsByUnit).reduce((a,b)=>a+b,0);
   const items = new Set(data.map((row) => row.item_id).filter(Boolean)).size;
-  return json({ ok: true, report_type: reportType, from: start, to: end, rows: data, summary: { rows: data.length, quantity_sub: totalQty, items }, can_view_prices: canViewPrices(user) });
+  return json({ ok: true, report_type: reportType, from: start, to: end, rows: data, summary: { rows: data.length, quantity_sub: totalQty, totals_by_unit: totalsByUnit, items }, can_view_prices: canViewPrices(user) });
 }
 
 async function listPurchaseRequisitions(env, user) {
   const query = canViewPrices(user)
-    ? "SELECT * FROM purchase_requisitions ORDER BY created_at DESC LIMIT 300"
-    : "SELECT * FROM purchase_requisitions WHERE requested_by = ? ORDER BY created_at DESC LIMIT 300";
+    ? "SELECT p.*,EXISTS(SELECT 1 FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=p.pr_id) AS has_receipt_history FROM purchase_requisitions p ORDER BY p.created_at DESC LIMIT 300"
+    : "SELECT p.*,EXISTS(SELECT 1 FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=p.pr_id) AS has_receipt_history FROM purchase_requisitions p WHERE p.requested_by = ? ORDER BY p.created_at DESC LIMIT 300";
   const result = canViewPrices(user)
     ? await env.DB.prepare(query).all()
     : await env.DB.prepare(query).bind(user.username).all();
@@ -517,11 +438,14 @@ async function approvePurchaseRequisition(request, env, admin, prId) {
 async function unapprovePurchaseRequisition(request, env, admin, prId) {
   const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
   if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  const receipts = await env.DB.prepare("SELECT 1 AS found FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=? LIMIT 1").bind(prId).first();
+  if (receipts) throw httpError("ใบ PR นี้มีประวัติรับของแล้ว ต้องเก็บเอกสารเดิมไว้ตรวจสอบ",409);
   if (pr.status !== "APPROVED") throw httpError("ถอยอนุมัติได้เฉพาะใบ PR ที่อนุมัติแล้วเท่านั้น", 409);
   await readBody(request);
-  await env.DB.prepare(
-    "UPDATE purchase_requisitions SET status = 'PENDING', approver = '', approved_by = '', approved_at = NULL, updated_at = ? WHERE pr_id = ?"
+  const changed = await env.DB.prepare(
+    "UPDATE purchase_requisitions SET status = 'PENDING', approver = '', approved_by = '', approved_at = NULL, updated_at = ? WHERE pr_id = ? AND NOT EXISTS (SELECT 1 FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=purchase_requisitions.pr_id)"
   ).bind(now(), prId).run();
+  if (!changed.meta.changes) throw httpError("ใบ PR มีรายการรับของระหว่างทำงาน กรุณารีเฟรช",409);
   await logAudit(env, admin.username, "UNAPPROVE_PR", "purchase_requisition", pr.pr_no, "SUCCESS", { pr_id: prId, previous_approved_by: pr.approved_by, previous_approved_at: pr.approved_at });
   return json({ ok: true });
 }
@@ -529,7 +453,9 @@ async function unapprovePurchaseRequisition(request, env, admin, prId) {
 async function updatePurchaseRequisition(request, env, user, prId) {
   const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
   if (!pr) throw httpError("ไม่พบใบ PR", 404);
-  if (user.role !== "admin" && pr.status !== "PENDING") throw httpError("แก้ไขได้เฉพาะใบ PR ที่ยังไม่ได้รับอนุมัติเท่านั้น", 409);
+  const receipts = await env.DB.prepare("SELECT 1 AS found FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=? LIMIT 1").bind(prId).first();
+  if (receipts) throw httpError("ใบ PR นี้มีประวัติรับของแล้ว ต้องเก็บเอกสารเดิมไว้ตรวจสอบ",409);
+  if (pr.status !== "PENDING") throw httpError("แก้ไขได้เฉพาะใบ PR ที่ยังไม่ได้รับอนุมัติเท่านั้น", 409);
   if (user.role !== "admin" && pr.requested_by !== user.username) throw httpError("แก้ไขได้เฉพาะใบ PR ที่ตัวเอง submit เท่านั้น", 403);
   const body = await readBody(request);
   const items = Array.isArray(body.items) ? body.items : [];
@@ -540,7 +466,8 @@ async function updatePurchaseRequisition(request, env, user, prId) {
   const requestDate = validDate(body.request_date) || pr.request_date || dateOnly(new Date());
   const requester = String(body.requester || pr.requester || user.username).trim() || user.username;
   const department = String(body.department || pr.department || "").trim();
-  const batch = [
+  const guardId=nextId('PRGUARD');
+  const batch = [env.DB.prepare("INSERT INTO workflow_guards(operation_id,ok) VALUES (?,CASE WHEN EXISTS(SELECT 1 FROM purchase_requisitions WHERE pr_id=? AND status='PENDING') THEN 1 ELSE 0 END)").bind(guardId,prId),
     env.DB.prepare(
       `UPDATE purchase_requisitions
        SET pr_no = ?, request_date = ?, requester = ?, department = ?, updated_at = ?
@@ -563,20 +490,27 @@ async function updatePurchaseRequisition(request, env, user, prId) {
       String(item.reason || ""), String(item.source || "")
     ));
   });
-  if (batch.length < 3) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนบันทึกแก้ไข");
-  await env.DB.batch(batch);
-  await logAudit(env, user.username, "UPDATE_PR", "purchase_requisition", prNo, "SUCCESS", { pr_id: prId, lines: batch.length - 2 });
+  const lineCount=batch.length-3;
+  if (lineCount < 1) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนบันทึกแก้ไข");
+  batch.push(env.DB.prepare("DELETE FROM workflow_guards WHERE operation_id=?").bind(guardId));
+  try { await env.DB.batch(batch); } catch(error) { if(/CHECK|FOREIGN KEY/.test(error.message)) throw httpError('ใบ PR เปลี่ยนระหว่างทำงาน กรุณารีเฟรช',409); throw error; }
+  await logAudit(env, user.username, "UPDATE_PR", "purchase_requisition", prNo, "SUCCESS", { pr_id: prId, lines: lineCount });
   return json({ ok: true, pr_id: prId, pr_no: prNo });
 }
 
 async function deletePurchaseRequisition(env, user, prId) {
   const pr = await env.DB.prepare("SELECT * FROM purchase_requisitions WHERE pr_id = ?").bind(prId).first();
   if (!pr) throw httpError("ไม่พบใบ PR", 404);
+  const receipts = await env.DB.prepare("SELECT 1 AS found FROM stock_operations o JOIN purchase_requisition_items l ON l.line_id=o.pr_line_id WHERE l.pr_id=? LIMIT 1").bind(prId).first();
+  if (receipts) throw httpError("ใบ PR นี้มีประวัติรับของแล้ว ต้องเก็บเอกสารเดิมไว้ตรวจสอบ",409);
   if (pr.status !== "PENDING") throw httpError("ลบได้เฉพาะใบ PR ที่ยังไม่ได้รับอนุมัติเท่านั้น", 409);
   if (pr.requested_by !== user.username && user.role !== "admin") throw httpError("ลบได้เฉพาะใบ PR ที่ตัวเอง submit เท่านั้น", 403);
+  const guardId=nextId('PRGUARD');
   await env.DB.batch([
+    env.DB.prepare("INSERT INTO workflow_guards(operation_id,ok) VALUES (?,CASE WHEN EXISTS(SELECT 1 FROM purchase_requisitions WHERE pr_id=? AND status='PENDING') THEN 1 ELSE 0 END)").bind(guardId,prId),
     env.DB.prepare("DELETE FROM purchase_requisition_items WHERE pr_id = ?").bind(prId),
     env.DB.prepare("DELETE FROM purchase_requisitions WHERE pr_id = ?").bind(prId),
+    env.DB.prepare("DELETE FROM workflow_guards WHERE operation_id=?").bind(guardId),
   ]);
   await logAudit(env, user.username, "DELETE_PR", "purchase_requisition", pr.pr_no, "SUCCESS", { pr_id: prId, requested_by: pr.requested_by });
   return json({ ok: true });
@@ -821,6 +755,7 @@ async function backup(env, user) {
     },
   };
   if (canViewPrices(user)) {
+    for (const table of ["stock_operations","stock_operation_units","stock_counts"]) data.tables[table]=await tableRows(env,table);
     data.tables.users = await tableRows(env, "users");
     data.tables.audit_logs = await tableRows(env, "audit_logs");
   }
@@ -834,6 +769,7 @@ async function restore(request, env, admin) {
   const body = await readBody(request);
   if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
   const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
+  for (const table of ["stock_operations","stock_operation_units","stock_counts"]) safety.tables[table]=await tableRows(env,table);
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -843,6 +779,10 @@ async function clearDatabase(request, env, admin) {
   const body = await readBody(request);
   if (String(body.password || "") !== CLEAR_PASSWORD) throw httpError("password สำหรับลบข้อมูลไม่ถูกต้อง", 403);
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM stock_operation_units"),
+    env.DB.prepare("DELETE FROM stock_counts"),
+    env.DB.prepare("DELETE FROM stock_operations"),
+    env.DB.prepare("DELETE FROM workflow_guards"),
     env.DB.prepare("DELETE FROM stock_units"),
     env.DB.prepare("DELETE FROM package_barcodes"),
     env.DB.prepare("DELETE FROM movements"),
@@ -862,18 +802,8 @@ async function optimize(env, user) {
 }
 
 async function replaceTables(env, tables) {
-  const stmts = [
-    env.DB.prepare("DELETE FROM audit_logs"),
-    env.DB.prepare("DELETE FROM purchase_requisition_items"),
-    env.DB.prepare("DELETE FROM purchase_requisitions"),
-    env.DB.prepare("DELETE FROM movements"),
-    env.DB.prepare("DELETE FROM stock_units"),
-    env.DB.prepare("DELETE FROM package_barcodes"),
-    env.DB.prepare("DELETE FROM items"),
-    env.DB.prepare("DELETE FROM settings"),
-    env.DB.prepare("DELETE FROM users"),
-  ];
-  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs"];
+  const stmts = ["stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
+  const order = ["items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts"];
   for (const table of order) {
     for (const row of tables[table] || []) {
       const keys = Object.keys(row);
@@ -1086,3 +1016,5 @@ function daysBetween(a, b) { return Math.floor((new Date(`${b}T00:00:00Z`) - new
 function publicUser(user) { return { user_id: user.user_id, username: user.username, role: user.role }; }
 function xml(text) { return String(text).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c])); }
 function escapeHtml(text) { return xml(text); }
+
+function workflows(env,user) { return stockWorkflow(env,user,{getActiveItem,findStockTarget,fefoWarnings}); }

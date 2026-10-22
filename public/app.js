@@ -25,7 +25,7 @@ const state = {
 
 const dashboardColumns = [
   ["status", "สถานะ"], ["name", "ชื่อ"], ["lot", "Lot"], ["expiry", "Expire"], ["machine", "เครื่อง"],
-  ["qty_sub", "จำนวนย่อย"], ["qty_main_display", "จำนวนหลัก"], ["sub_unit", "หน่วย"], ["unit_price", "ราคาย่อย"],
+  ["qty_sub", "จำนวนคงเหลือ"], ["qty_main_display", "จำนวนหลัก"], ["sub_unit", "หน่วย"], ["unit_price", "ราคาย่อย"],
   ["main_unit_price", "ราคาหลัก"], ["stock_value", "มูลค่า Stock"], ["reorder_point_sub", "Safety Stock"],
   ["lead_time_days", "Lead"], ["supplier", "Supplier"],
 ];
@@ -34,6 +34,7 @@ const priceColumnKeys = new Set(["unit_price", "main_unit_price", "stock_value",
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+const workflowUi = {busy:false,consumeBusy:false,operations:[],cursor:null,counts:[],prLines:[],recent:[]};
 boot();
 
 async function boot() {
@@ -49,6 +50,7 @@ async function boot() {
 }
 
 function bindUi() {
+  bindWorkflowUi();
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     showLoginError("");
@@ -144,6 +146,7 @@ function bindUi() {
 }
 
 function showApp() {
+  showPendingStockWrite();
   $("#loginView").classList.add("hidden");
   $("#appView").classList.remove("hidden");
   $("#userLabel").textContent = `${state.user.username} (${state.user.role})`;
@@ -160,6 +163,8 @@ function switchTab(tab) {
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
   if (tab === "items") resizeItemsTable();
+  if (tab === "operations") refreshOperations().catch(error=>toast(error.message,true));
+  if (tab === "counts") refreshCounts().catch(error=>toast(error.message,true));
   if (state.stockViewsDirty.has(tab)) {
     const refreshers = {
       dashboard: refreshDashboard,
@@ -413,9 +418,10 @@ async function openReceiveDialog(itemId) {
   $("#receiveDialogTitle").textContent = `รับเข้า: ${item.reagent_name}`;
   $("#receiveDialogMeta").textContent = `${item.machine || "-"} | ${item.main_unit || "-"} / ${item.sub_unit || "-"} | Supplier: ${item.supplier || "-"}`;
   const enabled = Number(item.has_sub_unit ?? 1) === 1;
-  form.unit_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อย</option><option value="main">หน่วยหลัก</option>' : '<option value="main">หน่วยหลัก</option>';
+  form.unit_mode.innerHTML = enabled ? `<option value="sub">${esc(item.sub_unit)}</option><option value="main">${esc(item.main_unit)}</option>` : `<option value="main">${esc(item.main_unit)}</option>`;
   form.sticker_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option>' : '<option value="sub">หน่วยหลักแยกดวง</option>';
   await refreshLotOptions();
+  await refreshReceiptLines(itemId);
   $("#receiveDialog").showModal();
   form.quantity.focus();
 }
@@ -430,7 +436,7 @@ async function refreshStock() {
 function renderStock() {
   renderTable($("#stockTable"), [
     ["barcode", "QR code"], ["reagent_name", "ชื่อ"], ["lot", "Lot"], ["expiry_date", "Expire"],
-    ["quantity_sub", "จำนวนย่อย"], ["sub_unit", "หน่วย"], ["received_at", "รับเมื่อ"], ["actions", "ตัดออก"],
+    ["quantity_sub", "จำนวน"], ["sub_unit", "หน่วย"], ["received_at", "รับเมื่อ"], ["actions", "ตัดออก"],
   ], state.stock.map((row) => ({ ...row, actions: row.barcode })), {
     actions: (_, row) => `<button data-manual-consume="${row.barcode}">ตัด Manual</button>`,
   });
@@ -443,7 +449,7 @@ async function refreshReprintStock() {
   state.reprintStock = res.rows;
   renderTable($("#reprintTable"), [
     ["select", ""], ["barcode", "QR code"], ["reagent_name", "ชื่อ"], ["lot", "Lot"], ["expiry_date", "Expire"],
-    ["quantity_sub", "จำนวนย่อย"], ["sub_unit", "หน่วย"], ["type", "ประเภท"], ["actions", "พิมพ์"],
+    ["quantity_sub", "จำนวน"], ["sub_unit", "หน่วย"], ["type", "ประเภท"], ["actions", "พิมพ์"],
   ], res.rows.map((row) => ({
     ...row,
     select: row.barcode,
@@ -466,21 +472,21 @@ async function refreshReport(e) {
   state.reportMeta = res;
   renderTable($("#reportTable"), reportColumns(res.report_type), res.rows.map((row) => ({
     ...row,
-    type_label: row.type === "RECEIVE" ? "รับเข้า" : "ตัด Stock",
+    type_label: workflowTypeLabel(row.type)+(row.reversed_by?" (กลับรายการแล้ว)":""),
   })));
 }
 
 function reportColumns(reportType) {
   const columns = [
     ["timestamp", "เวลา"], ["type_label", "ประเภท"], ["reagent_name", "ชื่อ"], ["lot", "Lot"],
-    ["barcode", "QR code"], ["quantity_sub", "จำนวนย่อย"], ["operator_username", "ผู้ทำรายการ"], ["operator_note", "Note"],
+    ["barcode", "QR code"], ["quantity_sub", "จำนวน"], ["display_unit", "หน่วย"], ["operator_username", "ผู้ทำรายการ"], ["operator_note", "Note"],
   ];
   return reportType === "receive" ? columns.filter(([key]) => key !== "barcode") : columns;
 }
 
 async function setReportType(type) {
   const form = $("#reportForm");
-  form.type.value = type === "consume" ? "consume" : "receive";
+  form.type.value = ["receive","consume","dispose","adjustment","all"].includes(type)?type:"receive";
   $$("[data-report-type]").forEach((btn) => btn.classList.toggle("active", btn.dataset.reportType === form.type.value));
   await refreshReport();
 }
@@ -522,16 +528,16 @@ function printReport() {
   const meta = state.reportMeta || {};
   const labName = state.branding.lab_name;
   const logoSrc = state.branding.logo_data_url;
-  const title = meta.report_type === "consume" ? "รายงานการตัด Stock" : "รายงานการรับน้ำยา";
+  const title = ({receive:"รายงานรับเข้า",consume:"รายงานนำไปใช้",dispose:"รายงานตัดทิ้ง",adjustment:"รายงานปรับยอด",all:"ประวัติการเคลื่อนไหว"})[meta.report_type]||"รายงาน";
   const showBarcode = meta.report_type !== "receive";
   const rows = state.reportRows.map((row) => `
     <tr>
       <td>${esc(formatDateTime(row.timestamp))}</td>
-      <td>${row.type === "RECEIVE" ? "รับเข้า" : "ตัด Stock"}</td>
+      <td>${esc(workflowTypeLabel(row.type))}${row.reversed_by?" (กลับรายการแล้ว)":""}</td>
       <td>${esc(row.reagent_name)}</td>
       <td>${esc(row.lot)}</td>
       ${showBarcode ? `<td>${esc(row.barcode)}</td>` : ""}
-      <td>${esc(row.quantity_sub)}</td>
+      <td>${esc(row.quantity_sub)} ${esc(row.display_unit||"")}</td>
       <td>${esc(row.operator_username)}</td>
       <td>${esc(row.operator_note)}</td>
     </tr>`).join("");
@@ -549,8 +555,8 @@ function printReport() {
     </style></head><body>
     <button onclick="window.print()">พิมพ์รายงาน</button>
     <header><img src="${esc(logoSrc)}" alt=""><div><h1>${title}</h1><p>${esc(labName)}</p><p>ช่วงวันที่ ${esc(meta.from || "")} ถึง ${esc(meta.to || "")}</p></div></header>
-    <div class="summary"><span>จำนวนรายการ: ${esc(meta.summary?.rows || 0)}</span><span>จำนวนหน่วยย่อยรวม: ${esc(meta.summary?.quantity_sub || 0)}</span><span>จำนวนชนิดน้ำยา: ${esc(meta.summary?.items || 0)}</span></div>
-    <table><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>Lot</th>${barcodeHeader}<th>จำนวนย่อย</th><th>ผู้ทำรายการ</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="summary"><span>จำนวนรายการ: ${esc(meta.summary?.rows || 0)}</span><span>ผลรวมแยกหน่วย (ไม่รวมรายการที่กลับแล้ว): ${esc(Object.entries(meta.summary?.totals_by_unit||{}).map(([unit,qty])=>`${qty} ${unit}`).join(" / "))}</span><span>จำนวนชนิดน้ำยา: ${esc(meta.summary?.items || 0)}</span></div>
+    <table><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>Lot</th>${barcodeHeader}<th>จำนวน / หน่วย</th><th>ผู้ทำรายการ</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table>
     </body></html>`);
   win.document.close();
 }
@@ -766,6 +772,7 @@ async function refreshPurchaseRequisitions() {
   }, (row) => row.status);
   $$("[data-approve-pr]").forEach((btn) => btn.addEventListener("click", () => approvePurchaseRequisition(btn.dataset.approvePr)));
   $$("[data-unapprove-pr]").forEach((btn) => btn.addEventListener("click", () => unapprovePurchaseRequisition(btn.dataset.unapprovePr)));
+  $$("[data-receive-pr]").forEach(btn=>btn.addEventListener("click",()=>openPrReceiving(btn.dataset.receivePr)));
   $$("[data-print-pr]").forEach((btn) => btn.addEventListener("click", () => printSavedPurchaseRequisition(btn.dataset.printPr)));
   $$("[data-edit-pr-request]").forEach((btn) => btn.addEventListener("click", () => editPurchaseRequisition(btn.dataset.editPrRequest)));
   $$("[data-delete-pr-request]").forEach((btn) => btn.addEventListener("click", () => deletePurchaseRequisition(btn.dataset.deletePrRequest)));
@@ -773,14 +780,15 @@ async function refreshPurchaseRequisitions() {
 
 function prRequestActions(row) {
   const isAdmin = canViewPrices();
-  const canEdit = isAdmin || (row.status === "PENDING" && row.requested_by === state.user?.username);
+  const canEdit = row.status === "PENDING" && (isAdmin || row.requested_by === state.user?.username);
   const canDelete = row.status === "PENDING" && (isAdmin || row.requested_by === state.user?.username);
   const approve = row.status === "PENDING" ? `<button data-approve-pr="${esc(row.pr_id)}" type="button">อนุมัติ</button>` : "";
-  const unapprove = row.status === "APPROVED" ? `<button class="warning" data-unapprove-pr="${esc(row.pr_id)}" type="button">ถอยอนุมัติ</button>` : "";
+  const unapprove = row.status === "APPROVED" && !row.has_receipt_history ? `<button class="warning" data-unapprove-pr="${esc(row.pr_id)}" type="button">ถอยอนุมัติ</button>` : "";
+  const receive = row.status==='APPROVED' ? `<button data-receive-pr="${esc(row.pr_id)}">รับของ / ดูยอดค้างรับ</button>` : '';
   const print = isAdmin ? `<button data-print-pr="${esc(row.pr_id)}" type="button">พิมพ์</button>` : "";
   const edit = canEdit ? `<button data-edit-pr-request="${esc(row.pr_id)}" type="button">แก้ไข</button>` : "";
   const remove = canDelete ? `<button class="danger" data-delete-pr-request="${esc(row.pr_id)}" type="button">ลบ</button>` : "";
-  return `<div class="row-actions">${isAdmin ? approve + unapprove : ""}${print}${edit}${remove}</div>`;
+  return `<div class="row-actions">${isAdmin ? approve + unapprove : ""}${receive}${print}${edit}${remove}</div>`;
 }
 
 async function submitPurchaseRequisition() {
@@ -1076,13 +1084,16 @@ function calcPrice(mode) {
 
 async function receiveStock(e) {
   e.preventDefault();
-  const res = await api("/api/receive", { method: "POST", body: formData(e.target) });
+  try {
+  const res = await stockWrite("/api/receive", formData(e.target));
   state.lastLabels = res.labels;
   $("#lastLabels").classList.remove("hidden");
   $("#lastLabelsList").innerHTML = res.labels.map((l) => `<span class="chip">${esc(l.code)} ${l.type === "main" ? "(หน่วยหลัก)" : ""}</span>`).join("");
   $("#receiveDialog").close();
   await Promise.all([refreshDashboard(), refreshStock(), refreshReprintStock(), refreshLotOptions(), refreshAuditMaybe()]);
+  if(e.target.pr_line_id.value) await refreshPurchaseRequisitions();
   if (await confirmBox("พิมพ์ QR code", "ต้องการเปิดหน้าพิมพ์ / Save PDF ตอนนี้ไหม?")) await printLabels(res.labels);
+  } catch(error) { toast(error.message,true); }
 }
 
 async function refreshLotOptions() {
@@ -1160,7 +1171,7 @@ function scheduleConsumeScan(e) {
   clearTimeout(state.consumeScanTimer);
   const form = e.target.form;
   const barcode = form.barcode.value.trim();
-  if (barcode.length < 8) return;
+  if (barcode.length < 8 || !$("#autoScanEnabled").checked) return;
   state.consumeScanTimer = setTimeout(() => consumeScannedBarcode(form), 420);
 }
 
@@ -1170,7 +1181,7 @@ async function consumeScannedBarcode(form) {
   state.consumeScanBusy = true;
   try {
     await consume({ barcode }, { scanned: true });
-    form.reset();
+    form.barcode.value = "";
     form.barcode.focus();
   } finally {
     state.consumeScanBusy = false;
@@ -1181,24 +1192,33 @@ async function manualConsume(code) {
   const target = state.stock.find((x) => x.barcode === code);
   let qty = target?.is_package ? Number(prompt(`QR หน่วยหลักนี้มี ${target.quantity_sub} ${target.sub_unit || "ชิ้น"} ต้องการตัดกี่ชิ้น?`, target.quantity_sub) || 0) : 1;
   if (!qty || qty < 1) return;
-  if (!(await confirmBox("ยืนยันตัด Stock แบบ Manual", `ตัด ${target.reagent_name} Lot ${target.lot} จำนวน ${qty} ${target.sub_unit || ""}?`))) return;
+  if (!(await confirmBox("ยืนยันตัด Stock แบบ Manual", `ตัด ${esc(target.reagent_name)} Lot ${esc(target.lot)} จำนวน ${qty} ${esc(target.sub_unit || "")}?`))) return;
   await consume({ barcode: code, package_quantity: qty });
 }
 
 async function consume(data, options = {}) {
+  if(workflowUi.consumeBusy) return toast('กำลังตรวจและบันทึกการสแกน กรุณารอ',true);
+  workflowUi.consumeBusy=true;
   try {
+    if (workflowUi.busy || readPendingStockWrite()) throw new Error("กรุณาตรวจรายการที่ค้างก่อนทำรายการใหม่");
+    if (workflowUi.recent.some(r=>r.barcode.toLowerCase()===data.barcode.toLowerCase()&&Date.now()-r.time<10000)) {
+      if (!(await confirmBox("สแกนรหัสเดิมซ้ำ", "รหัสนี้เพิ่งทำรายการใน 10 วินาทีที่ผ่านมา ต้องการตัดเพิ่มจริงหรือไม่?"))) return;
+    }
+    const form=$("#consumeForm"); data.kind=form.kind?.value||"CONSUME";
+    data.reason=form.reason?.value.trim()||""; data.note=data.reason;
+    if (data.kind==='DISPOSE' && data.reason.length<3) throw new Error("กรุณาระบุเหตุผลตัดทิ้งอย่างน้อย 3 ตัวอักษร");
     const preview = await api("/api/consume/preview", { method: "POST", body: data });
     if (preview.target.is_package && !data.package_quantity) {
       const qty = prompt(`QR หน่วยหลักนี้มี ${preview.target.quantity_sub} ${preview.target.sub_unit || "ชิ้น"} ต้องการตัดกี่ชิ้น?`, preview.target.quantity_sub);
       if (!qty) return;
       data.package_quantity = qty;
     }
-    if (preview.warnings.length) {
-      const ok = await confirmBox("แจ้งเตือน FEFO", `${preview.warnings.join("<br>")}<br><br>ยืนยันว่าจะนำน้ำยา QR นี้ออกจาก stock ไปใช้จริงหรือไม่?`);
+    if (preview.warnings.length && data.kind!=="DISPOSE") {
+      const ok = await confirmBox("แจ้งเตือน FEFO", `${preview.warnings.map(esc).join("<br>")}<br><br>ยืนยันว่าจะนำน้ำยา QR นี้ออกจาก stock ไปใช้จริงหรือไม่?`);
       if (!ok) return;
       data.confirm_fefo = true;
     }
-    const result = await api("/api/consume", { method: "POST", body: data });
+    const result = await stockWrite("/api/consume",data);
     // Keep the scanner responsive without reading the whole inventory after every scan.
     state.stock = state.stock.flatMap((row) => {
       if (row.barcode !== result.barcode && row.barcode !== result.parent_barcode) return [row];
@@ -1207,10 +1227,12 @@ async function consume(data, options = {}) {
     });
     ["dashboard", "pr", "reprint", "reports", "settings"].forEach((tab) => state.stockViewsDirty.add(tab));
     renderStock();
+    showScanResult(result,preview.target);
     toast(options.scanned ? `ตัด Stock แล้ว: ${preview.target.reagent_name}` : "ตัด Stock แล้ว");
   } catch (error) {
     toast(error.message, true);
   } finally {
+    workflowUi.consumeBusy=false;
     if (options.scanned) $("#consumeForm").barcode.focus();
   }
 }
@@ -1422,7 +1444,7 @@ function compare(a, b, asc) {
 async function api(path, opts = {}) {
   const res = await fetch(path, jsonOpts(opts));
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok || data.ok === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), {status:res.status});
   return data;
 }
 
@@ -1512,4 +1534,163 @@ function downloadJson(data, filename) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// Durable client request IDs let a lost response be checked or retried safely.
+function pendingStockKey(){ return `stock-pending:${state.user?.username||'anonymous'}`; }
+function readPendingStockWrite(){
+ try{return JSON.parse(localStorage.getItem(pendingStockKey())||'null');}catch{return null;}
+}
+function showPendingStockWrite(){
+ const pending=readPendingStockWrite(),panel=$('#pendingStockWrite');
+ if(!panel)return;
+ panel.classList.toggle('hidden',!pending);
+ if(pending)$('#pendingStockText').textContent=`${pending.path} · รหัส ${pending.body.request_id} · ${formatDateTime(pending.created_at)}`;
+}
+async function stockWrite(path,data){
+ if(workflowUi.busy)throw new Error('กำลังบันทึก กรุณารอผล');
+ if(readPendingStockWrite())throw new Error('มีรายการที่ยังไม่ยืนยันผล กรุณาตรวจสถานะหรือส่งคำขอเดิมอีกครั้ง');
+ const command={path,body:{...data,request_id:crypto.randomUUID()},created_at:new Date().toISOString()};
+ // Fail before sending if this browser cannot persist the recovery key.
+ localStorage.setItem(pendingStockKey(),JSON.stringify(command));showPendingStockWrite();
+ return sendPendingStockWrite(command);
+}
+async function sendPendingStockWrite(command){
+ if(workflowUi.busy)throw new Error('กำลังบันทึก กรุณารอผล');
+ workflowUi.busy=true;
+ try{
+  const result=await api(command.path,{method:'POST',body:command.body});
+  localStorage.removeItem(pendingStockKey());showPendingStockWrite();return result;
+ }catch(error){
+  // A client validation error confirms no mutation. Server/network errors are uncertain.
+  if(error.status>=400&&error.status<500){localStorage.removeItem(pendingStockKey());showPendingStockWrite();throw error;}
+  try{
+   const status=await api(`/api/operations/status?request_id=${encodeURIComponent(command.body.request_id)}`);
+   if(status.found){localStorage.removeItem(pendingStockKey());showPendingStockWrite();return {...status.result,replayed:true};}
+  }catch{}
+  showPendingStockWrite();throw new Error('ยังยืนยันผลบันทึกไม่ได้ อย่าทำรายการใหม่ ให้ใช้ตรวจสถานะหรือส่งคำขอเดิมอีกครั้ง');
+ }finally{workflowUi.busy=false;}
+}
+async function recoverPendingStockWrite(retry){
+ const command=readPendingStockWrite();if(!command||workflowUi.busy)return;
+ try{
+  let result;
+  if(retry)result=await sendPendingStockWrite(command);
+  else{
+   const status=await api(`/api/operations/status?request_id=${encodeURIComponent(command.body.request_id)}`);
+   if(!status.found){toast('ยังไม่พบรายการที่บันทึกสำเร็จ สามารถส่งคำขอเดิมอีกครั้งได้โดยใช้ปุ่มด้านล่าง',true);return;}
+   result=status.result;localStorage.removeItem(pendingStockKey());showPendingStockWrite();
+  }
+  if(result.labels?.length)showWorkflowLabels(result.labels);
+  if(command.path==='/api/consume')showScanResult(result,{reagent_name:result.item_name});
+  await refreshAll();toast('ยืนยันผลสำเร็จ · '+result.operation_id);
+ }catch(error){toast(error.message,true);}
+}
+function showWorkflowLabels(labels){
+ state.lastLabels=labels;
+ $('#lastLabels').classList.remove('hidden');
+ $('#lastLabelsList').innerHTML=labels.map(l=>`<span class="chip">${esc(l.code)}</span>`).join('');
+ // Printing is also available after recovering a response or a count adjustment.
+ const panel=$('#workflowLabels');
+ if(panel){panel.hidden=!labels.length;}
+}
+function workflowTypeLabel(kind){return ({RECEIVE:'รับเข้า',CONSUME:'นำไปใช้',DISPOSE:'ตัดทิ้ง',ADJUSTMENT:'ปรับยอด',COUNT_DRAFT:'บันทึกผลนับ',REVERSAL:'กลับรายการ',REVERSAL_RECEIVE:'กลับการรับเข้า',REVERSAL_CONSUME:'คืนจากการใช้',REVERSAL_DISPOSE:'คืนจากการตัดทิ้ง',REVERSAL_ADJUSTMENT:'กลับการปรับยอด'})[kind]||kind;}
+function showScanResult(result,target){
+ const row={barcode:result.barcode,item:result.item_name||target.reagent_name,lot:result.lot||target.lot,quantity:result.consumed,unit:result.unit||target.sub_unit||'',time:Date.now(),kind:result.kind||'CONSUME'};
+ if(!workflowUi.recent.some(r=>r.operation_id===result.operation_id))workflowUi.recent.unshift({...row,operation_id:result.operation_id});
+ workflowUi.recent=workflowUi.recent.slice(0,10);
+ $('#scanFeedback').textContent=`สำเร็จ: ${workflowTypeLabel(row.kind)} ${row.item} · Lot ${row.lot} · ${row.quantity} ${row.unit} · คงเหลือใน QR นี้ ${result.remaining_sub} ${row.unit}`;
+ $('#recentScans').innerHTML='<strong>รายการสแกนล่าสุด (ในหน้านี้)</strong>'+workflowUi.recent.map(r=>`<p>${esc(new Date(r.time).toLocaleTimeString('th-TH'))} · ${esc(workflowTypeLabel(r.kind))} ${esc(r.item)} · Lot ${esc(r.lot)} · ${esc(r.quantity)} ${esc(r.unit)} · ${esc(r.barcode)}</p>`).join('');
+}
+function bindWorkflowUi(){
+ const safe=fn=>async event=>{try{await fn(event);}catch(error){toast(error.message,true);}};
+ $('#refreshOperationsBtn').addEventListener('click',safe(()=>refreshOperations()));
+ $('#moreOperationsBtn').addEventListener('click',safe(()=>refreshOperations(true)));
+ $('#refreshCountsBtn').addEventListener('click',safe(refreshCounts));
+ $('#countForm').addEventListener('submit',safe(async event=>{
+  event.preventDefault();const body=formData(event.target);
+  const res=await stockWrite('/api/stock-counts',body);
+  toast(`บันทึกผลนับแล้ว: ในระบบ ${res.system_qty} / นับจริง ${res.counted_qty} / ต่าง ${res.difference}`);
+  await refreshCounts();
+ }));
+ $('#countForm').item_id.addEventListener('change',safe(refreshCountLots));
+ $('#countLotSelect').addEventListener('change',()=>{
+  const selected=$('#countLotSelect').selectedOptions[0];
+  $('#countForm').lot.value=selected.dataset.lot||'';
+  $('#countForm').expiry_date.value=selected.dataset.expiry||'';
+ });
+ $('#checkPendingWrite').addEventListener('click',()=>recoverPendingStockWrite(false));
+ $('#retryPendingWrite').addEventListener('click',()=>recoverPendingStockWrite(true));
+ $('#receiveForm').pr_line_id.addEventListener('change',updateReceiptHint);
+ $('#autoScanEnabled').addEventListener('change',()=>clearTimeout(state.consumeScanTimer));
+ $('#consumeForm').kind.addEventListener('change',()=>{
+  $('#consumeForm').reason.required=$('#consumeForm').kind.value==='DISPOSE';
+  $('#consumeForm').reason.minLength=$('#consumeForm').kind.value==='DISPOSE'?3:0;
+ });
+ $('#printWorkflowLabels').addEventListener('click',()=>printLabels(state.lastLabels));
+}
+async function refreshOperations(append=false){
+ const res=await api('/api/operations'+(append&&workflowUi.cursor?`?before=${encodeURIComponent(workflowUi.cursor)}`:''));
+ workflowUi.operations=append?[...workflowUi.operations,...res.rows]:res.rows;workflowUi.cursor=res.next_cursor;
+ $('#moreOperationsBtn').hidden=!res.next_cursor;
+ renderTable($('#operationsTable'),[['created_at','เวลา'],['kind','ประเภท'],['reagent_name','สินค้า'],['lot','Lot'],['quantity','จำนวน'],['unit','หน่วย'],['username','ผู้ทำรายการ'],['reason','เหตุผล'],['operation_id','รหัสรายการ'],['action','การดำเนินการ']],workflowUi.operations,{
+  kind:workflowTypeLabel,
+  action:(_,row)=>`<button data-detail-operation="${esc(row.operation_id)}">ดู QR</button>`+(row.reversed_by?'กลับรายการแล้ว':state.user.role==='admin'&&['RECEIVE','CONSUME','DISPOSE','ADJUSTMENT'].includes(row.kind)?`<button data-reverse-operation="${esc(row.operation_id)}">กลับรายการ</button>`:''),
+ });
+ $$('[data-detail-operation]').forEach(button=>button.addEventListener('click',async()=>{
+  try { const result=await api(`/api/operations/${encodeURIComponent(button.dataset.detailOperation)}/units`);$('#operationDetailsRows').innerHTML='';renderTable($('#operationDetailsRows').appendChild(document.createElement('table')),[['barcode','QR'],['after_status','สถานะหลังทำรายการ'],['current_status','สถานะปัจจุบัน']],result.rows);$('#operationDetailsDialog').showModal(); }catch(error){toast(error.message,true);}
+ }));
+ $$('[data-reverse-operation]').forEach(button=>button.addEventListener('click',async()=>{
+  const why=prompt('ระบุเหตุผลการกลับรายการ (อย่างน้อย 3 ตัวอักษร)');if(!why)return;
+  const row=workflowUi.operations.find(r=>r.operation_id===button.dataset.reverseOperation);
+  if(!await confirmBox('ยืนยันกลับรายการ',`${esc(workflowTypeLabel(row.kind))} ${esc(row.reagent_name)} · Lot ${esc(row.lot)} · ${row.quantity} ${esc(row.unit)}<br>เหตุผล: ${esc(why)}<br>ระบบจะเปลี่ยนสถานะ QR และคืน/หักยอดตามรายการเดิม โดยเก็บประวัติไว้ ต้องการดำเนินการหรือไม่?`))return;
+  try{await stockWrite(`/api/operations/${encodeURIComponent(button.dataset.reverseOperation)}/reverse`,{reason:why});await refreshOperations();await refreshStock();['dashboard','reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast('กลับรายการสำเร็จ');}catch(error){toast(error.message,true);}
+ }));
+}
+async function refreshCounts(){
+ const form=$('#countForm'),selected=form.item_id.value;
+ form.item_id.innerHTML='<option value="">เลือกสินค้า</option>'+state.items.filter(i=>Number(i.is_active??1)).map(item=>`<option value="${esc(item.item_id)}">${esc(item.reagent_name)} (${esc(item.sub_unit||item.main_unit)})</option>`).join('');
+ form.item_id.value=selected;await refreshCountLots();
+ const res=await api('/api/stock-counts');workflowUi.counts=res.rows;
+ renderTable($('#countsTable'),[['created_at','วันที่นับ'],['reagent_name','สินค้า'],['lot','Lot'],['expiry_date','หมดอายุ'],['system_qty','ยอดระบบ ณ ตอนนับ'],['counted_qty','นับจริง'],['difference','ผลต่าง'],['unit','หน่วย'],['reason','เหตุผล'],['status','สถานะ'],['approved_by','ผู้ยืนยัน'],['actions','ยืนยัน']],res.rows.map(row=>({...row,difference:row.counted_qty-row.system_qty})),{
+  status:(value,row)=>row.status==='APPROVED'?`ยืนยันแล้ว${row.reversed_by?' (กลับรายการแล้ว)':''}`:'รอยืนยัน',
+  actions:(_,row)=>state.user.role==='admin'&&row.status==='PENDING'?`<button data-approve-count="${esc(row.count_id)}">ตรวจผลต่าง / ยืนยัน</button>`:'',
+ });
+ $$('[data-approve-count]').forEach(button=>button.addEventListener('click',async()=>{
+  const row=workflowUi.counts.find(r=>r.count_id===button.dataset.approveCount);
+  if(!await confirmBox('ยืนยันผลตรวจนับ',`${esc(row.reagent_name)} Lot ${esc(row.lot)}: ยอดระบบ ${row.system_qty} → นับจริง ${row.counted_qty} ${esc(row.unit)} (ผลต่าง ${row.counted_qty-row.system_qty})<br>เหตุผล: ${esc(row.reason)}<br>หากยอดเคลื่อนไประหว่างนับ ระบบจะให้ตรวจนับใหม่`))return;
+  try{const result=await stockWrite(`/api/stock-counts/${encodeURIComponent(row.count_id)}/approve`,{});if(result.labels?.length){showWorkflowLabels(result.labels);if(await confirmBox('พิมพ์ QR สำหรับยอดที่เพิ่ม','ต้องการพิมพ์ QR สำหรับสินค้าที่ตรวจพบเพิ่มหรือไม่?'))await printLabels(result.labels);}await refreshCounts();await refreshStock();['dashboard','reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast('ยืนยันผลนับแล้ว');}catch(error){toast(error.message,true);}
+ }));
+}
+async function refreshCountLots(){
+ const itemId=$('#countForm').item_id.value,item=state.items.find(i=>i.item_id===itemId);
+ $('#countUnit').textContent=item?.sub_unit||item?.main_unit||'หน่วย';
+ if(!itemId){$('#countLotSelect').innerHTML='<option value="">ระบุ Lot / วันหมดอายุเอง</option>';return;}
+ const result=await api(`/api/stock-counts/lots?item_id=${encodeURIComponent(itemId)}`);
+ $('#countLotSelect').innerHTML='<option value="">ระบุ Lot / วันหมดอายุเอง</option>'+result.rows.map((row,index)=>`<option value="${index}" data-lot="${esc(row.lot)}" data-expiry="${esc(row.expiry_date)}">${esc(row.lot)} · ${esc(row.expiry_date)} · ${row.quantity} ${esc(item?.sub_unit||'')}</option>`).join('');
+}
+async function refreshReceiptLines(itemId){
+ const result=await api('/api/pr-receiving');workflowUi.prLines=result.rows;
+ $('#receiveForm').pr_line_id.innerHTML='<option value="">รับเข้าทั่วไป</option>'+result.rows.filter(line=>!line.item_id||line.item_id===itemId).map(line=>`<option value="${esc(line.line_id)}">${esc(line.pr_no)} · ${esc(line.item_name)} · ค้าง ${Number(line.order_qty)-Number(line.received_qty)} ${esc(line.unit)}</option>`).join('');
+ updateReceiptHint();
+}
+function updateReceiptHint(){
+ const form=$('#receiveForm'),line=workflowUi.prLines.find(l=>l.line_id===form.pr_line_id.value);
+ $('#prReceiptHint').textContent=line?`ขอซื้อ ${line.order_qty} ${line.unit} · รับแล้ว ${line.received_qty} · ค้างรับ ${Number(line.order_qty)-Number(line.received_qty)} ${line.unit} — ตรวจหน่วยรับเข้าให้ตรงก่อนบันทึก`:'';
+ const item=state.items.find(i=>i.item_id===form.item_id.value);
+ if(line&&item)form.unit_mode.value=line.unit===item.main_unit?'main':'sub';
+}
+async function openPrReceiving(prId){
+ const row=state.prRequests.find(r=>r.pr_id===prId);if(!row)return;
+ const rows=row.items.map(line=>`<tr><td>${esc(line.item_name)}</td><td>${line.order_qty}</td><td>${line.received_qty||0}</td><td>${Number(line.order_qty)-Number(line.received_qty||0)}</td><td>${esc(line.unit)}</td><td>${Number(line.received_qty||0)<Number(line.order_qty)?`<button data-open-pr-line="${esc(line.line_id)}">รับเข้า</button>`:'ครบแล้ว'}</td></tr>`).join('');
+ $('#prReceivingTitle').textContent=`รับของจาก ${row.pr_no}`;
+ $('#prReceivingRows').innerHTML=`<table><thead><tr><th>รายการ</th><th>ขอซื้อ</th><th>รับแล้ว</th><th>ค้างรับ</th><th>หน่วย</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+ $('#prReceivingDialog').showModal();
+ $$('[data-open-pr-line]').forEach(button=>button.addEventListener('click',async()=>{
+  const line=row.items.find(l=>l.line_id===button.dataset.openPrLine);
+  let itemId=line.item_id;
+  if(!itemId){itemId=$('#prReceiptItem').value;if(!itemId)return toast('กรุณาเลือกสินค้าสำหรับรายการที่เพิ่มเอง',true);}
+  try{$('#prReceivingDialog').close();await openReceiveDialog(itemId);$('#receiveForm').pr_line_id.value=line.line_id;updateReceiptHint();}catch(error){toast(error.message,true);}
+ }));
+ $('#prReceiptItem').innerHTML='<option value="">เลือกสินค้าเมื่อบรรทัด PR เพิ่มเอง</option>'+state.items.map(i=>`<option value="${esc(i.item_id)}">${esc(i.reagent_name)}</option>`).join('');
 }

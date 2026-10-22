@@ -667,3 +667,15 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
 [data-sub-unit-field][hidden] { display: none !important; }
 .unit-toggle input { width: auto; min-height: auto; }
 .unit-toggle small { color: var(--muted); }
+
+.pending-write { position: fixed; bottom: 12px; right: 16px; z-index: 90; max-width: min(600px,95vw); border: 2px solid #a15c00; background: #fff4d6; }
+#scanFeedback { font-size: 20px; border-left: 5px solid var(--ok); }
+#recentScans p { margin: 4px 0; }
+.workflow-labels { position: sticky; bottom: 0; z-index: 5; margin-left: 22px; }
+.workflow-labels { position: fixed; right: 16px; bottom: 12px; max-width: 400px; margin: 0; }
+[hidden] { display: none !important; }
+
+@media (min-width: 981px) {
+  .sidebar nav { flex: 1; min-height: 0; overflow-y: auto; align-content: start; }
+  .sidebar .brand, .sidebar #logoutBtn, .sidebar .sidebar-footer { flex-shrink: 0; }
+}

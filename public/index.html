@@ -42,6 +42,8 @@
         <button class="nav" data-tab="receive"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="M12 12v8.5"/><path d="m4.5 8 7.5 4 7.5-4"/><path d="M12 3v5.5"/><path d="m9.5 6 2.5 2.5L14.5 6"/></svg></span>รับเข้าคลัง</button>
         <button class="nav" data-tab="reprint"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7V4h10v3"/><path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7z"/><path d="M9 17h6"/></svg></span>พิมพ์ QR ซ้ำ</button>
         <button class="nav" data-tab="consume"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4"/><path d="M14 5h4"/><path d="M6 19h4"/><path d="M14 19h4"/><path d="M5 6v4"/><path d="M19 6v4"/><path d="M5 14v4"/><path d="M19 14v4"/><path d="M8 12h8"/><path d="m13.5 9.5 2.5 2.5-2.5 2.5"/></svg></span>ตัด Stock</button>
+        <button class="nav" data-tab="operations">ประวัติ / กลับรายการ</button>
+        <button class="nav" data-tab="counts">ตรวจนับสต๊อก</button>
         <button class="nav" data-tab="reports"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3 3V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M14.5 3.5V7H18"/><path d="M8 11h8"/><path d="M8 15h8"/><path d="M8 18h5"/></svg></span>รายงาน</button>
         <div class="nav-group">
           <button class="nav nav-parent" data-tab="pr"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h13l-1.4 7.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6L5.8 4H3"/><path d="M9 20h.1"/><path d="M17 20h.1"/><path d="M10 11h6"/><path d="M13 8v6"/></svg></span>สร้างใบสั่งซื้อ</button>
@@ -159,6 +161,22 @@
         </div>
       </section>
 
+      <section id="operations" class="tab">
+        <header class="page-head"><div><h2>ประวัติและกลับรายการ</h2><p>บันทึกย้อนหลังโดยไม่ลบรายการเดิม การกลับรายการต้องระบุเหตุผลและใช้สิทธิ์ผู้ดูแล</p></div><button id="refreshOperationsBtn">รีเฟรช</button></header>
+        <p class="panel">กลับรายการได้เฉพาะรายการที่สร้างหลังอัปเดตนี้ และ QR ต้องไม่มีการเปลี่ยนแปลงต่อ หากเป็นรายการเก่าให้ใช้ตรวจนับและปรับยอด</p>
+        <div class="table-wrap"><table id="operationsTable"></table></div><button id="moreOperationsBtn" hidden>โหลดรายการก่อนหน้า</button>
+      </section>
+      <section id="counts" class="tab">
+        <header class="page-head"><div><h2>ตรวจนับและปรับยอดสต๊อก</h2><p>นับเป็นหน่วยที่ใช้ตัดจริง แยกสินค้า Lot และวันหมดอายุ ผู้ดูแลตรวจผลต่างก่อนยืนยัน</p></div><button id="refreshCountsBtn">รีเฟรช</button></header>
+        <form id="countForm" class="panel grid-form">
+          <label>สินค้า<select name="item_id" required></select></label>
+          <label>Lot ที่มีในคลัง<select id="countLotSelect"><option value="">ระบุ Lot / วันหมดอายุเอง</option></select></label>
+          <label>Lot<input name="lot" required></label><label>วันหมดอายุ<input name="expiry_date" type="date" required></label>
+          <label>ยอดนับจริง (<span id="countUnit">หน่วย</span>)<input name="counted_qty" type="number" min="0" max="1000000000" step="1" required></label>
+          <label>เหตุผล<input name="reason" minlength="3" maxlength="500" required></label><button class="primary">บันทึกผลนับเพื่อรอผู้ดูแลยืนยัน</button>
+        </form>
+        <div class="table-wrap"><table id="countsTable"></table></div>
+      </section>
       <section id="consume" class="tab">
         <header class="page-head">
           <div><h2>ตัด Stock</h2><p class="muted">สแกน QR หรือเลือกจากรายการที่ยังอยู่ในคลัง พร้อมตรวจ FEFO</p></div>
@@ -166,8 +184,13 @@
         </header>
         <form id="consumeForm" class="panel grid-form form-panel">
           <label class="span-2">QR code<input name="barcode" autocomplete="off" placeholder="สแกน QR เพื่อตัด Stock อัตโนมัติ" required></label>
+          <label>ประเภท<select name="kind"><option value="CONSUME">นำไปใช้งาน</option><option value="DISPOSE">ตัดทิ้ง / หมดอายุ / เสียหาย</option></select></label>
+          <label>เหตุผล / หมายเหตุ<input name="reason" maxlength="500" placeholder="ต้องระบุเมื่อตัดทิ้ง"></label>
+          <label class="span-2 unit-toggle"><span><input id="autoScanEnabled" type="checkbox" checked> ตัดอัตโนมัติหลังสแกน (ปิดเพื่อกดยืนยันเอง)</span></label>
           <button class="primary span-2">ตัด Stock จาก QR</button>
         </form>
+        <div id="scanFeedback" class="panel" aria-live="polite">พร้อมสแกน — ตรวจสินค้า Lot และหน่วยก่อนนำออก</div>
+        <div id="recentScans" class="panel" aria-live="polite"></div>
         <div class="table-wrap">
           <table id="stockTable" class="data-table sortable"></table>
         </div>
@@ -183,7 +206,10 @@
         </header>
         <div class="subnav panel">
           <button class="subnav-btn active" type="button" data-report-type="receive">รายงานรับน้ำยา</button>
-          <button class="subnav-btn" type="button" data-report-type="consume">รายงานการตัดสต๊อกน้ำยา</button>
+          <button class="subnav-btn" type="button" data-report-type="consume">รายงานนำไปใช้</button>
+          <button class="subnav-btn" type="button" data-report-type="dispose">รายงานตัดทิ้ง</button>
+          <button class="subnav-btn" type="button" data-report-type="adjustment">รายงานปรับยอด</button>
+          <button class="subnav-btn" type="button" data-report-type="all">ประวัติทุกประเภท</button>
         </div>
         <form id="reportForm" class="panel grid-form form-panel">
           <input name="type" type="hidden" value="receive">
@@ -387,6 +413,8 @@
         <button type="button" id="closeReceiveDialogBtn" class="ghost">ปิด</button>
       </div>
       <input name="item_id" type="hidden" required>
+      <label class="span-2">รับจากใบ PR ที่อนุมัติแล้ว (ไม่บังคับ)<select name="pr_line_id"><option value="">รับเข้าทั่วไป</option></select></label>
+      <p id="prReceiptHint" class="span-2 muted"></p>
       <label>จำนวน<input name="quantity" type="number" min="1" value="1" required></label>
       <label>รับเข้าเป็น<select name="unit_mode"><option value="sub">หน่วยย่อย</option><option value="main">หน่วยหลัก</option></select></label>
       <label>Sticker QR<select name="sticker_mode"><option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option></select></label>
@@ -427,6 +455,10 @@
     </form>
   </dialog>
 
+  <dialog id="operationDetailsDialog" class="form-dialog"><div class="panel"><h3>QR ในรายการ</h3><div id="operationDetailsRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
+  <dialog id="prReceivingDialog" class="form-dialog"><div class="panel"><h3 id="prReceivingTitle">รับของจาก PR</h3><label>สินค้าสำหรับบรรทัดที่เพิ่มเอง<select id="prReceiptItem"></select></label><div id="prReceivingRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
+  <div id="workflowLabels" class="workflow-labels panel" hidden><span>มี QR จากรายการล่าสุด</span><button id="printWorkflowLabels">พิมพ์ QR ล่าสุด</button></div>
+  <aside id="pendingStockWrite" class="pending-write panel hidden" role="status"><strong>มีรายการที่ยังไม่ได้ยืนยันผล ห้ามบันทึกซ้ำด้วยรายการใหม่</strong><p id="pendingStockText"></p><button id="checkPendingWrite">ตรวจสถานะ</button><button id="retryPendingWrite">ส่งคำขอเดิมอีกครั้ง</button></aside>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

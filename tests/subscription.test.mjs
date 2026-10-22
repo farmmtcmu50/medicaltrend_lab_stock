@@ -175,3 +175,104 @@ test('optional sub units preserve single-unit stock, conversion, backups and his
  assert.equal((await send('/api/items',{...base,has_sub_unit:1,sub_unit:'ขวด',sub_per_main:1.5})).status,400);
  const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.equal(backup.data.tables.items.find(i=>i.item_id===id).has_sub_unit,0);
 });
+
+let workflowItem,receiptOperation,receiptBarcode,workflowPrLine,workflowCookie;
+async function wfAuth(){if(!workflowCookie)workflowCookie=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;return workflowCookie;}
+async function wfPost(path,body={},cookie){return tenantRequest('tenant-a',path,{method:'POST',cookie:cookie||await wfAuth(),body:{request_id:randomUUID(),...body}});}
+test('stock operations commit once across parallel retries and reject reused payloads',async()=>{
+ const cookie=await wfAuth();
+ workflowItem=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{reagent_name:'Workflow reagent',main_unit:'กล่อง',has_sub_unit:1,sub_unit:'ขวด',sub_per_main:5,main_unit_price:500}})).data.item_id;
+ const body={request_id:randomUUID(),item_id:workflowItem,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'WF',expiry_date:'2029-12-31'};
+ const [a,b]=await Promise.all([wfPost('/api/receive',body,cookie),wfPost('/api/receive',body,cookie)]);
+ assert.equal(a.status,200,JSON.stringify(a.data));assert.equal(b.status,200,JSON.stringify(b.data));assert.equal(a.data.operation_id,b.data.operation_id);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) AS n FROM stock_units WHERE item_id=?").bind(workflowItem).first()).n,10);
+ const reused=await wfPost('/api/receive',{...body,quantity:3},cookie);assert.equal(reused.status,409);
+ const status=await tenantRequest('tenant-a','/api/operations/status?request_id='+body.request_id,{cookie});assert.equal(status.data.result.total_sub,10);
+ const old=await wfPost('/api/receive',body,cookie);assert.equal(old.data.labels[0].code,a.data.labels[0].code);
+});
+test('concurrent stock consumes never create duplicate movements; reversals preserve downstream work',async()=>{
+ const pack=(await aDb.prepare('SELECT package_barcode FROM package_barcodes WHERE item_id=? LIMIT 1').bind(workflowItem).first()).package_barcode;
+ const cookie=await wfAuth(),body={request_id:randomUUID(),barcode:pack,package_quantity:2};
+ const [a,b]=await Promise.all([wfPost('/api/consume',body,cookie),wfPost('/api/consume',body,cookie)]);
+ assert.equal(a.status,200,JSON.stringify(a.data));assert.equal(b.status,200);assert.equal(a.data.operation_id,b.data.operation_id);
+ assert.equal(a.data.remaining_sub,3);
+ assert.equal((await aDb.prepare('SELECT COUNT(*) AS n FROM movements WHERE movement_id=?').bind(a.data.operation_id).first()).n,1);
+ const reversal=await wfPost('/api/operations/'+a.data.operation_id+'/reverse',{reason:'ตัดผิดรายการ'});assert.equal(reversal.status,200,JSON.stringify(reversal.data));
+ assert.equal((await aDb.prepare("SELECT COUNT(*) AS n FROM stock_units WHERE parent_barcode=? AND status='IN_STOCK'").bind(pack).first()).n,5);
+ assert.equal((await wfPost('/api/operations/'+a.data.operation_id+'/reverse',{reason:'ทำซ้ำ'})).status,409);
+ const receive=(await aDb.prepare("SELECT operation_id FROM stock_operations WHERE item_id=? AND kind='RECEIVE' LIMIT 1").bind(workflowItem).first()).operation_id;
+ assert.equal((await wfPost('/api/operations/'+receive+'/reverse',{reason:'ย้อนเกินรายการถัดไป'})).status,409);
+});
+test('write-offs require a reason and stay separate from consumption reports',async()=>{
+ const code=(await aDb.prepare("SELECT barcode FROM stock_units WHERE item_id=? AND status='IN_STOCK' LIMIT 1").bind(workflowItem).first()).barcode;
+ assert.equal((await wfPost('/api/consume',{barcode:code,kind:'DISPOSE'})).status,400);
+ const disposed=await wfPost('/api/consume',{barcode:code,kind:'DISPOSE',reason:'ชำรุดจากการขนส่ง'});assert.equal(disposed.status,200);
+ assert.equal((await aDb.prepare('SELECT status FROM stock_units WHERE barcode=?').bind(code).first()).status,'DISPOSED');
+ const today=new Date().toISOString().slice(0,10),cookie=await wfAuth();
+ const report=await tenantRequest('tenant-a',`/api/reports?type=dispose&from=${today}&to=${today}`,{cookie});assert.equal(report.status,200,JSON.stringify(report.data));assert.ok(report.data.rows.some(r=>r.movement_id===disposed.data.operation_id&&r.display_unit==='ขวด'));
+ const used=await tenantRequest('tenant-a',`/api/reports?type=consume&from=${today}&to=${today}`,{cookie});assert.ok(!used.data.rows.some(r=>r.movement_id===disposed.data.operation_id));
+ assert.equal((await wfPost('/api/operations/'+disposed.data.operation_id+'/reverse',{reason:'พบว่าไม่ชำรุด'})).status,200);
+});
+test('count approval detects stale snapshots and adds/reduces exact units with printable QR',async()=>{
+ const count=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'COUNT',expiry_date:'2029-12-31',counted_qty:3,reason:'ตรวจนับพบเพิ่มเติม'});assert.equal(count.status,200,JSON.stringify(count.data));
+ const approve=await wfPost('/api/stock-counts/'+count.data.count_id+'/approve');assert.equal(approve.status,200,JSON.stringify(approve.data));assert.equal(approve.data.labels.length,3);
+ assert.equal((await wfPost('/api/stock-counts/'+count.data.count_id+'/approve')).status,409);
+ const second=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'COUNT',expiry_date:'2029-12-31',counted_qty:1,reason:'ยอดนับจริงลดลง'});
+ const reduced=await wfPost('/api/stock-counts/'+second.data.count_id+'/approve');assert.equal(reduced.status,200);assert.equal(reduced.data.difference,-2);
+ const stale=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'COUNT',expiry_date:'2029-12-31',counted_qty:1,reason:'รอตรวจยืนยัน'});
+ const code=(await aDb.prepare("SELECT barcode FROM stock_units WHERE item_id=? AND lot='COUNT' AND status='IN_STOCK'").bind(workflowItem).first()).barcode;
+ assert.equal((await wfPost('/api/consume',{barcode:code,confirm_fefo:true})).status,200);
+ assert.equal((await wfPost('/api/stock-counts/'+stale.data.count_id+'/approve')).status,409);
+ assert.equal((await aDb.prepare('SELECT status FROM stock_counts WHERE count_id=?').bind(stale.data.count_id).first()).status,'PENDING');
+});
+test('PR partial receipts track outstanding quantities, reject overdelivery and reverse receipts',async()=>{
+ const cookie=await wfAuth();
+ const pr=await tenantRequest('tenant-a','/api/purchase-requisitions',{method:'POST',cookie,body:{requester:'Test',items:[{item_id:workflowItem,item_name:'Workflow reagent',order_qty:2,unit:'กล่อง'}]}});assert.equal(pr.status,200);
+ const prId=pr.data.pr_id;
+ await tenantRequest('tenant-a',`/api/purchase-requisitions/${prId}/approve`,{method:'PUT',cookie,body:{}});
+ workflowPrLine=(await aDb.prepare('SELECT line_id FROM purchase_requisition_items WHERE pr_id=?').bind(prId).first()).line_id;
+ const body={item_id:workflowItem,pr_line_id:workflowPrLine,quantity:1,unit_mode:'main',sticker_mode:'sub',lot:'PR',expiry_date:'2030-01-01'};
+ const first=await wfPost('/api/receive',body);assert.equal(first.status,200,JSON.stringify(first.data));assert.equal(first.data.total_sub,5);receiptOperation=first.data.operation_id;receiptBarcode=first.data.labels[0].code;
+ assert.equal((await aDb.prepare('SELECT received_qty FROM purchase_requisition_items WHERE line_id=?').bind(workflowPrLine).first()).received_qty,1);
+ assert.equal((await wfPost('/api/receive',{...body,quantity:2})).status,409);
+ assert.equal((await tenantRequest('tenant-a',`/api/purchase-requisitions/${prId}/unapprove`,{method:'PUT',cookie,body:{}})).status,409);
+ assert.equal((await tenantRequest('tenant-a',`/api/purchase-requisitions/${prId}`,{method:'PUT',cookie,body:{items:[]}})).status,409);
+ assert.equal((await wfPost('/api/operations/'+first.data.operation_id+'/reverse',{reason:'รับผิดเอกสาร'})).status,200);
+ assert.equal((await aDb.prepare('SELECT received_qty FROM purchase_requisition_items WHERE line_id=?').bind(workflowPrLine).first()).received_qty,0);
+ const all=await wfPost('/api/receive',{...body,quantity:2});assert.equal(all.status,200);
+ const outstanding=await tenantRequest('tenant-a','/api/pr-receiving',{cookie});assert.ok(!outstanding.data.rows.some(l=>l.line_id===workflowPrLine));
+});
+test('staff can submit counts but cannot approve or reverse; full backup restores workflow history',async()=>{
+ const time=new Date().toISOString();const staffSalt='workflow-staff-salt';
+ const {passwordHash}=await import('../subscription/src/security.js');
+ await aDb.prepare("INSERT INTO users(user_id,username,password_hash,salt,role,is_active,created_at,updated_at) VALUES ('wf-staff','wf-staff',?,?,'staff',1,?,?)").bind(await passwordHash(password,staffSalt),staffSalt,time,time).run();
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const submitted=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'STAFF',expiry_date:'2029-01-01',counted_qty:1,reason:'นับโดยเจ้าหน้าที่'},staff);assert.equal(submitted.status,200);
+ assert.equal((await wfPost('/api/stock-counts/'+submitted.data.count_id+'/approve',{},staff)).status,403);
+ assert.equal((await wfPost('/api/operations/'+receiptOperation+'/reverse',{reason:'เจ้าหน้าที่ลองย้อน'},staff)).status,403);
+ const cookie=await wfAuth(),backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.stock_operations.length>0);
+ const restore=await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:backup.data});assert.equal(restore.status,200,JSON.stringify(restore.data));
+ assert.equal((await aDb.prepare('SELECT reversed_by FROM stock_operations WHERE operation_id=?').bind(receiptOperation).first()).reversed_by.length>0,true);
+ const otherCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ const other=await tenantRequest('tenant-b','/api/operations',{cookie:otherCookie});assert.ok(!other.data.rows.some(o=>o.item_id===workflowItem));
+});
+
+test('different request IDs competing for one QR cannot both decrement stock',async()=>{
+ const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie:await wfAuth(),body:{reagent_name:'Race item',main_unit:'ขวด',has_sub_unit:0}})).data.item_id;
+ const receipt=await wfPost('/api/receive',{item_id:item,quantity:1,lot:'RACE',expiry_date:'2030-01-01'});assert.equal(receipt.status,200);
+ const barcode=receipt.data.labels[0].code;
+ const results=await Promise.all([wfPost('/api/consume',{barcode}),wfPost('/api/consume',{barcode})]);
+ assert.equal(results.filter(r=>r.status===200).length,1,JSON.stringify(results));
+ assert.equal((await aDb.prepare("SELECT COUNT(*) AS n FROM movements WHERE item_id=? AND type='CONSUME'").bind(item).first()).n,1);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) AS n FROM stock_units WHERE item_id=? AND status='IN_STOCK'").bind(item).first()).n,0);
+});
+test('concurrent count approval commits once, unchanged counts are reversible and invalid dates fail safely',async()=>{
+ const counted=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'RACE-COUNT',expiry_date:'2030-01-01',counted_qty:2,reason:'ตรวจนับพร้อมกัน'});
+ const results=await Promise.all([wfPost('/api/stock-counts/'+counted.data.count_id+'/approve'),wfPost('/api/stock-counts/'+counted.data.count_id+'/approve')]);
+ assert.equal(results.filter(r=>r.status===200).length,1,JSON.stringify(results));
+ assert.equal((await aDb.prepare("SELECT COUNT(*) AS n FROM stock_units WHERE item_id=? AND lot='RACE-COUNT' AND status='IN_STOCK'").bind(workflowItem).first()).n,2);
+ const same=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'RACE-COUNT',expiry_date:'2030-01-01',counted_qty:2,reason:'นับตรงกับระบบ'});
+ const confirmed=await wfPost('/api/stock-counts/'+same.data.count_id+'/approve');assert.equal(confirmed.status,200);assert.equal(confirmed.data.difference,0);
+ assert.equal((await wfPost('/api/operations/'+confirmed.data.operation_id+'/reverse',{reason:'ยืนยันผิดใบตรวจนับ'})).status,200);
+ assert.equal((await wfPost('/api/receive',{item_id:workflowItem,quantity:1,lot:'INVALID',expiry_date:'2030-13-01'})).status,400);
+});
