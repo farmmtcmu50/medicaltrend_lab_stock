@@ -312,6 +312,8 @@ test('supplier registry requires item links, protects master edits, and preserve
  const old=await tenantRequest('tenant-a','/api/suppliers/'+alpha,{cookie});assert.ok(old.data.stock.some(r=>r.item_id===item&&r.quantity===2));assert.ok(!old.data.items.some(r=>r.item_id===item));
  await wfPost('/api/receive',{item_id:item,quantity:1,lot:'BETA',expiry_date:'2028-12-31'},cookie);
  const latest=await tenantRequest('tenant-a','/api/suppliers/'+beta,{cookie});assert.ok(latest.data.items.some(r=>r.item_id===item));assert.ok(latest.data.stock.some(r=>r.item_id===item&&r.quantity===1));
+ for(const row of (await aDb.prepare("SELECT barcode FROM stock_units WHERE item_id=? AND lot='ALPHA' AND status='IN_STOCK'").bind(item).all()).results)assert.equal((await wfPost('/api/consume',{barcode:row.barcode,confirm_fefo:true},cookie)).status,200);
+ const history=await tenantRequest('tenant-a','/api/suppliers/'+alpha,{cookie});assert.ok(history.data.purchased.some(r=>r.item_id===item&&r.received_qty===2));assert.ok(!history.data.stock.some(r=>r.item_id===item));
  assert.equal((await call('/api/suppliers/'+beta,{name:'Supplier Beta Renamed',is_active:0},'PUT')).status,200);
  assert.equal((await aDb.prepare('SELECT supplier FROM items WHERE item_id=?').bind(item).first()).supplier,'Supplier Beta Renamed');
  assert.equal((await call('/api/items',{...itemBody,supplier_id:beta})).status,400);

@@ -1806,6 +1806,7 @@ async function openSupplierDetails(id){
  $('#supplierDetailsTitle').textContent=res.supplier.name;
  $('#supplierDetailsContact').textContent=[res.supplier.contact_name,res.supplier.phone,res.supplier.email,res.supplier.address,res.supplier.note].filter(Boolean).join(' · ');
  renderTable($('#supplierItemsTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['main_unit','หน่วยหลัก'],['sub_unit','หน่วยตัดจริง'],['is_active','สถานะ'],['actions','จัดการ']],res.items,{is_active:v=>v?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,r)=>`<button data-supplier-item="${esc(r.item_id)}">แก้ไขน้ำยา / Supplier</button>`});
+ renderTable($('#supplierPurchasedTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['received_qty','จำนวนสะสมในประวัติ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.purchased,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
  renderTable($('#supplierStockTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['quantity','จำนวนคงเหลือ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.stock,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
  $$('[data-supplier-item]').forEach(button=>button.addEventListener('click',async()=>{try{const res=await api('/api/items');state.items=res.rows;$('#supplierDetailsDialog').close();editItem(button.dataset.supplierItem);}catch(e){toast(e.message,true);}}));
  $('#supplierDetailsDialog').showModal();

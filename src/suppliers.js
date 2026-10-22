@@ -16,11 +16,12 @@ export async function supplierApi(request,env,user,helpers){
  if(method==='GET'&&/^\/api\/suppliers\/[^/]+$/.test(path)){
   const id=decodeURIComponent(path.split('/').at(-1)),supplier=await env.DB.prepare('SELECT * FROM suppliers WHERE supplier_id=?').bind(id).first();
   if(!supplier)throw fail('ไม่พบ Supplier',404);
-  const [items,stock]=await env.DB.batch([
+  const [items,stock,purchased]=await env.DB.batch([
    env.DB.prepare("SELECT item_id,reagent_name,machine,main_unit,sub_unit,is_active FROM items WHERE supplier_id=? AND is_deleted=0 ORDER BY reagent_name").bind(id),
-   env.DB.prepare("SELECT item_id,reagent_name,machine,lot,expiry_date,sub_unit,COUNT(*) quantity,MIN(supplier_verified) verified FROM stock_units WHERE supplier_id=? AND status='IN_STOCK' GROUP BY item_id,reagent_name,machine,lot,expiry_date,sub_unit ORDER BY expiry_date,reagent_name").bind(id)
+   env.DB.prepare("SELECT item_id,reagent_name,machine,lot,expiry_date,sub_unit,COUNT(*) quantity,MIN(supplier_verified) verified FROM stock_units WHERE supplier_id=? AND status='IN_STOCK' GROUP BY item_id,reagent_name,machine,lot,expiry_date,sub_unit ORDER BY expiry_date,reagent_name").bind(id),
+   env.DB.prepare("SELECT item_id,reagent_name,machine,sub_unit,COUNT(*) received_qty,MIN(supplier_verified) verified FROM stock_units WHERE supplier_id=? AND status<>'VOID' GROUP BY item_id,reagent_name,machine,sub_unit ORDER BY reagent_name").bind(id)
   ]);
-  return {ok:true,supplier,items:items.results,stock:stock.results};
+  return {ok:true,supplier,items:items.results,stock:stock.results,purchased:purchased.results};
  }
  if(!['POST','PUT'].includes(method))throw fail('Method not allowed',405);
  if(user.role!=='admin')throw fail('ต้องใช้สิทธิ์ผู้ดูแลเพื่อแก้ไขทะเบียน Supplier',403);
