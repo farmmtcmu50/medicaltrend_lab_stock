@@ -64,6 +64,21 @@ export function stockWorkflow(env,user,helpers){
    return {ok:true,rows:rows.results,next_cursor:rows.results.length===100?rows.results.at(-1).created_at+'|'+rows.results.at(-1).operation_id:null};
   },
   async details(id){return {ok:true,rows:(await query('SELECT u.barcode,u.after_status,s.status AS current_status FROM stock_operation_units u LEFT JOIN stock_units s ON s.barcode=u.barcode WHERE u.operation_id=? ORDER BY u.barcode LIMIT 2000',id).all()).results};},
+  async disposeExpired(body){
+   const op=await begin(body,'DISPOSE');if(op.replay)return op.replay;
+   const itemId=String(body.item_id||''),lot=String(body.lot||''),expiry=date(body.expiry_date),qty=integer(body.quantity,'จำนวนตัดทิ้ง'),why='หมดอายุ: '+reason(body.reason);
+   if(expiry>=timestamp().slice(0,10))throw fail('รายการนี้ยังไม่หมดอายุ ไม่สามารถตัดทิ้งจากหน้าหมดอายุได้');
+   const item=await query('SELECT * FROM items WHERE item_id=?',itemId).first();if(!item)throw fail('ไม่พบรายการน้ำยา',404);
+   const signature=await snapshot(itemId,lot,expiry);
+   const count=Number((await query("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? AND status='IN_STOCK'",itemId,lot,expiry).first()).n);
+   if(!count||count!==Number(body.expected_count)||qty>count)throw fail('ยอดคงเหลือเปลี่ยนไป กรุณาเปิดรายการใหม่และตรวจจำนวนก่อนตัดทิ้ง',409);
+   const units=(await query("SELECT * FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? AND status='IN_STOCK' ORDER BY barcode LIMIT ?",itemId,lot,expiry,qty).all()).results;
+   if(units.length!==qty)throw fail('ยอดคงเหลือเปลี่ยนไป กรุณาเปิดรายการใหม่',409);
+   const batch=[guard(op.id,`(${snapshotSql})=?`,itemId,lot,expiry,signature),...validateUnits(op.id,units)];
+   for(const unit of units)batch.push(remember(op.id,unit,'DISPOSED'),query("UPDATE stock_units SET status='DISPOSED',used_at=?,used_by=?,note=?,last_operation=? WHERE barcode=?",timestamp(),user.username,why,op.id,unit.barcode));
+   batch.push(...packageUpdates(units.map(u=>u.parent_barcode)),movement(op.id,'DISPOSE',item,lot,qty,why,units.map(u=>u.barcode)));
+   return commit(op,body,batch,{item_id:itemId,item_name:item.reagent_name,lot,expiry_date:expiry,quantity:qty,unit:item.sub_unit||item.main_unit,remaining_sub:count-qty},{itemId,reason:why});
+  },
   async itemLots(params){
    const item=await query('SELECT item_id,reagent_name,sub_unit,main_unit,is_active FROM items WHERE item_id=? AND is_deleted=0',params.get('item_id')||'').first();
    if(!item)throw fail('ไม่พบรายการน้ำยา',404);

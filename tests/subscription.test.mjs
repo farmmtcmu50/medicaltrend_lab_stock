@@ -402,3 +402,25 @@ test('deleting supplier moves item, stock and PR links atomically to unassigned 
  assert.equal((await aDb.prepare('PRAGMA foreign_key_check').all()).results.length,0);
  assert.equal((await tenantRequest('tenant-a','/api/suppliers/'+supplier,{cookie})).status,404);
 });
+
+test('dashboard expired disposal affects only selected expired lot and supports replay, audit and reversal',async()=>{
+ const cookie=await wfAuth(),vendor=await aDb.prepare('SELECT supplier_id FROM suppliers WHERE is_placeholder=0 AND is_active=1 LIMIT 1').first();
+ const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{supplier_id:vendor.supplier_id,reagent_name:'Expired disposal test',main_unit:'กล่อง',sub_unit:'ขวด',has_sub_unit:1,sub_per_main:3,main_unit_price:300}})).data.item_id;
+ await wfPost('/api/receive',{item_id:item,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'EXPIRED',expiry_date:'2020-01-01'},cookie);
+ await wfPost('/api/receive',{item_id:item,quantity:1,lot:'FUTURE',expiry_date:'2099-01-01'},cookie);
+ const body={request_id:randomUUID(),item_id:item,lot:'EXPIRED',expiry_date:'2020-01-01',quantity:2,expected_count:6,reason:'น้ำยาหมดอายุ ตรวจสอบแล้ว'};
+ assert.equal((await wfPost('/api/dispose-expired',{...body,request_id:randomUUID(),expiry_date:'2099-01-01',lot:'FUTURE',expected_count:1,quantity:1},cookie)).status,400);
+ assert.equal((await wfPost('/api/dispose-expired',{...body,request_id:randomUUID(),expected_count:5},cookie)).status,409);
+ const result=await wfPost('/api/dispose-expired',body,cookie);assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.remaining_sub,4);
+ const replay=await wfPost('/api/dispose-expired',body,cookie);assert.equal(replay.data.operation_id,result.data.operation_id);assert.equal(replay.data.replayed,true);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND lot='EXPIRED' AND status='DISPOSED'").bind(item).first()).n,2);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND lot='FUTURE' AND status='IN_STOCK'").bind(item).first()).n,1);
+ const movement=await aDb.prepare('SELECT type,quantity_sub,operator_note FROM movements WHERE movement_id=?').bind(result.data.operation_id).first();assert.equal(movement.type,'DISPOSE');assert.equal(movement.quantity_sub,2);assert.match(movement.operator_note,/หมดอายุ/);
+ assert.equal((await aDb.prepare('SELECT COUNT(*) n FROM stock_operation_units WHERE operation_id=?').bind(result.data.operation_id).first()).n,2);
+ assert.equal((await wfPost('/api/operations/'+result.data.operation_id+'/reverse',{reason:'Reverse test disposal'},cookie)).status,200);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND lot='EXPIRED' AND status='IN_STOCK'").bind(item).first()).n,6);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await wfPost('/api/dispose-expired',{...body,request_id:randomUUID(),quantity:6},staff)).status,200);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM package_barcodes WHERE item_id=? AND status='IN_STOCK'").bind(item).first()).n,0);
+ assert.equal((await wfPost('/api/dispose-expired',{...body,request_id:randomUUID()},cookie)).status,409);
+});

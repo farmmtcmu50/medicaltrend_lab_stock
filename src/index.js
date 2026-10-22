@@ -54,6 +54,7 @@ async function api(request, env) {
   if (method === "GET" && path === "/stock-counts") return json(await flow.counts());
   if(method==='GET'&&path==='/item-lots')return json(await flow.itemLots(url.searchParams));
   if(method==='GET'&&path==='/item-lots/units')return json(await flow.lotUnits(url.searchParams));
+  if(method==='POST'&&path==='/dispose-expired')return json(await flow.disposeExpired(await readBody(request)));
   if(method==='POST'&&path==='/item-lots/edit')return json(await flow.editLot(await readBody(request)));
   if (method === "GET" && path === "/stock-counts/lots") return json(await flow.lots(url.searchParams.get('item_id')||''));
   if (method === "POST" && path === "/stock-counts") return json(await flow.createCount(await readBody(request)));

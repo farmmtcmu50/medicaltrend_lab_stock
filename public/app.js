@@ -147,6 +147,10 @@ function bindUi() {
   $("#restoreForm").addEventListener("submit", restoreBackup);
   $("#clearForm").addEventListener("submit", clearDatabase);
   $("#optimizeBtn").addEventListener("click", optimizeDb);
+  for(const id of ['dashboardTable','analyticsDetailsTable'])$('#'+id).addEventListener('click',event=>{const button=event.target.closest('[data-expired-dispose]');if(button)openExpiredDisposal(button.dataset.expiredDispose,button.dataset.lot,button.dataset.expiry).catch(e=>toast(e.message,true));});
+  $('#cancelExpiredDisposalBtn').addEventListener('click',()=>$('#expiredDisposalDialog').close());
+  $('#expiredDisposalForm').lot_index.addEventListener('change',updateExpiredDisposalBalance);
+  $('#expiredDisposalForm').addEventListener('submit',saveExpiredDisposal);
   $('#cancelEditLotBtn').addEventListener('click',()=>$('#editLotDialog').close());
   $('#moreLotUnitsBtn').addEventListener('click',()=>loadLotUnits(true).catch(e=>toast(e.message,true)));
   $('#editLotForm').addEventListener('submit',async event=>{event.preventDefault();try{const old=state.managedLot,body={...formData(event.target),item_id:state.managedLotItem,lot:old.lot,expiry_date:old.expiry_date,expected_count:old.total};await stockWrite('/api/item-lots/edit',body);$('#editLotDialog').close();await openItemLots(state.managedLotItem);['dashboard','reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));await refreshStock();toast('แก้ไข Lot แล้ว กรุณาพิมพ์ฉลากใหม่');}catch(e){toast(e.message,true);}});
@@ -303,7 +307,9 @@ function filteredDashboardRows() {
 }
 
 function renderDashboardTable() {
-  renderTable($("#dashboardTable"), dashboardVisibleColumns(), filteredDashboardRows(), {
+  const rows=filteredDashboardRows(),columns=dashboardVisibleColumns();if(rows.some(row=>row.status==='EXPIRED'))columns.push(['dispose_action','ตัดทิ้ง']);
+  renderTable($("#dashboardTable"), columns, rows, {
+    dispose_action:(_,row)=>row.status==='EXPIRED'?expiredDisposeButton(row.item_id):'',
     status: (v) => `<span class="badge ${v}">${v}</span>`,
     unit_price: money, main_unit_price: money, stock_value: money,
   }, (row) => row.status);
@@ -352,7 +358,7 @@ function saveDashboardColumnPreference(visible) {
 
 function applyDashboardColumnVisibility() {
   const visible = new Set($$("input:checked", $("#dashboardColumns")).map((box) => box.dataset.col));
-  $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", !visible.has(cell.dataset.key)));
+  $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", cell.dataset.key!=='dispose_action'&&!visible.has(cell.dataset.key)));
 }
 
 async function refreshItems() {
@@ -1778,7 +1784,8 @@ function openAnalyticsDetails(key,filter={}){
   title='การส่งมอบและระยะเวลารอของ — เอกสารที่อนุมัติ';rows=a.deliveries.map(d=>({...d,complete:d.complete?'รับครบ':'ยังไม่ครบ',on_time:d.eligible?(d.on_time?'ตรงเวลาและครบ':'ไม่ผ่าน'):'ยังไม่เข้าเกณฑ์ / วันที่ไม่ครบ',lead_days:d.lead_days??'—',actions:state.user.role==='admin'?`<button data-delivery="${esc(d.pr_id)}">กำหนดวันที่</button>`:''}));
   columns=[['pr_no','เอกสาร PR ที่อ้างอิง PO'],['vendor','Vendor'],['issued_date','ออก PO'],['expected_date','นัดส่ง'],['received_date','รับครบ'],['complete','สถานะ'],['on_time','OTIF ในช่วงที่เลือก'],['lead_days','Lead Time (วัน)'],['actions','วันที่']];
  }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=a.inventory||[];columns=[['name','น้ำยา'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
- $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
+ if(key==='near'&&rows.some(row=>row.days<0)){columns.push(['dispose_action','ตัดทิ้ง']);rows=rows.map(row=>({...row,dispose_action:row.days<0?expiredDisposeButton(row.item_id,row.lot,row.expiry_date):''}));}
+ $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{dispose_action:v=>v,actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
  $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
  $('#analyticsDetailsDialog').showModal();
 }
@@ -1840,3 +1847,29 @@ async function loadLotUnits(append=false){
 }
 
 function nearExpiryRows(rows,filter={}){return rows.filter(row=>(!filter.machine||(row.machine||'ไม่ระบุเครื่อง')===filter.machine)&&(!filter.bucket||row.bucket===filter.bucket));}
+
+function expiredDisposeButton(itemId,lot='',expiry=''){return `<button class="danger" data-expired-dispose="${esc(itemId)}" data-lot="${esc(lot)}" data-expiry="${esc(expiry)}">ตัดน้ำยาทิ้ง</button>`;}
+async function openExpiredDisposal(itemId,lot,expiry){
+ const res=await api('/api/item-lots?item_id='+encodeURIComponent(itemId)),today=new Date().toISOString().slice(0,10);
+ const rows=res.rows.filter(r=>r.in_stock>0&&r.expiry_date<today);
+ if(!rows.length){toast('ไม่มีน้ำยาหมดอายุคงเหลือแล้ว กรุณารีเฟรช Dashboard');await refreshDashboard();return;}
+ state.expiredDisposal={item:res.item,rows};const form=$('#expiredDisposalForm');form.reset();
+ $('#expiredDisposalItem').textContent=res.item.reagent_name;
+ form.lot_index.innerHTML=rows.map((r,index)=>`<option value="${index}">${esc(r.lot)} · ${esc(formatDateOnly(r.expiry_date))} · คงเหลือ ${r.in_stock} ${esc(res.item.sub_unit||res.item.main_unit)}</option>`).join('');
+ const match=rows.findIndex(r=>r.lot===lot&&r.expiry_date===expiry);form.lot_index.value=String(match>=0?match:0);updateExpiredDisposalBalance();$('#expiredDisposalDialog').showModal();
+}
+function updateExpiredDisposalBalance(){
+ const {item,rows}=state.expiredDisposal,form=$('#expiredDisposalForm'),row=rows[Number(form.lot_index.value)];
+ const unit=item.sub_unit||item.main_unit;$('#expiredDisposalUnit').textContent=unit;$('#expiredDisposalBalance').textContent=`คงเหลือ ${row.in_stock} ${unit} · บันทึกได้ครั้งละไม่เกิน 2,000 หน่วย`;
+ form.quantity.max=String(Math.min(row.in_stock,2000));form.quantity.value=String(Math.min(row.in_stock,2000));
+}
+async function saveExpiredDisposal(event){
+ event.preventDefault();const button=$('#saveExpiredDisposalBtn');if(button.disabled)return;button.disabled=true;
+ try{
+  const {item,rows}=state.expiredDisposal,form=event.target,row=rows[Number(form.lot_index.value)],quantity=Number(form.quantity.value),why=form.reason.value.trim();
+  if(!await confirmBox('ยืนยันตัดน้ำยาหมดอายุทิ้ง',`${esc(item.reagent_name)} · Lot ${esc(row.lot)} · หมดอายุ ${esc(formatDateOnly(row.expiry_date))}<br>จำนวน ${esc(quantity)} ${esc(item.sub_unit||item.main_unit)}<br>เหตุผล: ${esc(why)}<br>ต้องการบันทึกตัดทิ้งรายการนี้หรือไม่?`))return;
+  const res=await stockWrite('/api/dispose-expired',{item_id:item.item_id,lot:row.lot,expiry_date:row.expiry_date,quantity,expected_count:row.in_stock,reason:why});
+  $('#expiredDisposalDialog').close();if($('#analyticsDetailsDialog').open)$('#analyticsDetailsDialog').close();
+  await refreshDashboard();await refreshStock();['reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast(`ตัดทิ้งแล้ว ${res.quantity} ${res.unit} · Lot ${res.lot} · คงเหลือ ${res.remaining_sub} ${res.unit}`);
+ }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+}
