@@ -38,3 +38,11 @@ test('OTIF counts only due dated orders and requires every vendor line to be rec
  const due=result.deliveries.filter(r=>r.eligible);assert.equal(due.length,3);assert.equal(due.filter(r=>r.on_time).length,1);
  assert.equal(due.find(r=>r.pr_id==='partial').complete,false);assert.equal(due.find(r=>r.pr_id==='late').lead_days,5);
 });
+
+
+test('period activity includes net-zero and zero-price movements but excludes outside-period events',()=>{
+ const items=['net-zero','free','idle','outside','adjust'].map(item_id=>({item_id,qty_sub:5,unit_price:item_id==='free'?0:10}));
+ const rows=inventoryMetrics(items,[{item_id:'net-zero',day:'2026-10-02',type:'RECEIVE',qty:2},{item_id:'net-zero',day:'2026-10-03',type:'CONSUME',qty:2},{item_id:'free',day:'2026-10-03',type:'RECEIVE',qty:1},{item_id:'outside',day:'2026-10-11',type:'RECEIVE',qty:1},{item_id:'adjust',day:'2026-10-04',type:'ADJUSTMENT',qty:0,movement_count:2}],{start:'2026-10-01',end:'2026-10-10'});
+ assert.deepEqual(rows.filter(r=>r.has_movement).map(r=>r.item_id),['net-zero','free','adjust']);
+ assert.equal(rows[0].opening_value,rows[0].closing_value);
+});
