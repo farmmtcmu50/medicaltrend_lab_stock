@@ -103,9 +103,9 @@ test('PR filters toggle independently and combine matches without duplicates',as
 test('stock value change uses closing minus opening and a shared symmetric scale',async()=>{
  const {context}=await workflowContext();
  const result=JSON.parse(vm.runInContext(`JSON.stringify(stockValueChanges([{item_id:'up',opening_value:100,closing_value:150},{item_id:'down',opening_value:200,closing_value:100},{item_id:'zero',opening_value:25,closing_value:25},{item_id:'round',opening_value:0.1,closing_value:0.3}]))`,context));
- assert.deepEqual(result.rows.map(r=>[r.item_id,r.change]),[['up',50],['round',0.2],['zero',0],['down',-100]]);assert.equal(result.max,100);
+ assert.deepEqual(result.rows.map(r=>[r.item_id,r.change]),[['up',50],['round',0.2],['down',-100]]);assert.equal(result.max,100);
  assert.equal(vm.runInContext('stockValueChanges([]).max',context),1);
- assert.equal(vm.runInContext('stockValueChanges([{opening_value:0,closing_value:0}]).rows[0].change',context),0);
+ assert.equal(vm.runInContext('stockValueChanges([{opening_value:0,closing_value:0}]).rows.length',context),0);
 });
 
 
@@ -123,4 +123,14 @@ test('supplier PR preview groups chosen vendors and rejects unassigned or invali
  const groups=JSON.parse(vm.runInContext('JSON.stringify(supplierPrGroups(state.prRows,state.suppliers))',context));assert.deepEqual(groups.map(g=>[g.supplier,g.rows.length]),[['Alpha',2],['Beta',1]]);
  assert.throws(()=>vm.runInContext("supplierPrGroups([{name:'bad',supplier:'Unknown',order_qty:1}],state.suppliers)",context));
  assert.throws(()=>vm.runInContext("supplierPrGroups([{name:'bad',supplier:'Alpha',order_qty:0}],state.suppliers)",context));
+});
+
+
+test('zero changes are excluded for all and specific vendors and machines in every sort mode',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.chartTest=[{name:'moving',machine:'M',supplier:'S',opening_value:10,closing_value:20,has_movement:true},{name:'offsetting',machine:'M',supplier:'S',opening_value:10,closing_value:10,has_movement:true},{name:'idle',machine:'M',supplier:'S',opening_value:10,closing_value:10,has_movement:false},{name:'rounded-zero',machine:'M',supplier:'S',opening_value:10,closing_value:10.001,has_movement:true}];`,context);
+ for(const sort of ['asc','desc','name'])for(const machine of ['','M'])for(const supplier of ['','S']){
+  const filters=JSON.stringify({sort,machine,supplier});
+  assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(stockValueChanges(state.chartTest,${filters}).rows.map(r=>r.name))`,context)),['moving']);
+ }
 });
