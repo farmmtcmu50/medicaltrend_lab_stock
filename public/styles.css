@@ -706,3 +706,11 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
 .analytics-track .near-segment { display:block; border:0; border-radius:0; padding:0; min-height:20px; height:20px; flex-shrink:0; cursor:pointer; }
 .analytics-track .near-segment:hover { filter:brightness(.85); }
 .near-machine:focus-visible,.near-segment:focus-visible { outline:2px solid #0f172a; outline-offset:-2px; }
+.pr-detail-link { border:0; background:transparent; color:#1d4ed8; padding:4px 0; font:inherit; font-weight:650; text-align:left; white-space:normal; cursor:pointer; }
+.pr-detail-link:hover { background:transparent; text-decoration:underline; }
+.pr-suggest-quantity { display:flex; align-items:center; gap:8px; }
+.pr-suggest-quantity input { width:100px; min-width:70px; }
+.pr-suggest-quantity span { white-space:nowrap; }
+#prSuggestionDetailsBody p { margin:8px 0 4px; }
+#pr .page-head.compact { flex-wrap:wrap; }
+#pr .page-head.compact .toolbar { flex:1 1 600px; flex-wrap:wrap; overflow:visible; }

@@ -66,3 +66,22 @@ test('near-expiry drilldown filters by exact machine and expiry bucket without m
  assert.deepEqual(lots("nearExpiryRows(state.analytics.near,{machine:'ไม่ระบุเครื่อง'})"),['D']);
  assert.deepEqual(lots('nearExpiryRows(state.analytics.near)'),['A','B','C','D']);
 });
+
+test('PR suggestions move into draft, avoid duplicates, and return after removal or clearing',async()=>{
+ const {context}=await workflowContext();context.CSS={escape:value=>value};
+ vm.runInContext(`state.dashboard=[{item_id:'A',name:'A',status:'EXPIRED',main_unit:'Box',sub_unit:'Test',sub_per_main:5},{item_id:'B',name:'B',status:'EXPIRING',main_unit:'Bottle'},{item_id:'C',name:'C',status:'CRITICAL',main_unit:'Box'}];state.prRows=[];$('#prSource').value='all';renderPurchaseRequisition=()=>{};confirmBox=async()=>true;`,context);
+ const ids=()=>JSON.parse(vm.runInContext('JSON.stringify(suggestedPrRows().map(r=>r.item_id))',context));
+ assert.deepEqual(ids(),['A','B','C']);
+ vm.runInContext(`$('[data-pr-qty="A"]').value='7';$('[data-pr-qty="B"]').value='9';addPrSuggestion('A');addPrSuggestion('A');`,context);
+ assert.deepEqual(ids(),['B','C']);assert.equal(vm.runInContext('state.prRows.length',context),1);assert.equal(vm.runInContext('state.prRows[0].order_qty',context),7);
+ vm.runInContext('state.prRows[0].order_qty=11;deletePrRow(state.prRows[0].id)',context);assert.deepEqual(ids(),['A','B','C']);assert.equal(vm.runInContext("state.prSuggestionQuantities.A",context),11);
+ vm.runInContext('addAllVisiblePrSuggestions()',context);assert.deepEqual(ids(),[]);assert.equal(vm.runInContext("state.prRows.find(r=>r.item_id==='B').order_qty",context),9);
+ await vm.runInContext('clearPurchaseRequisition()',context);assert.deepEqual(ids(),['A','B','C']);
+ vm.runInContext("state.prRows=[{id:'manual-a',item_id:'A',source:'manual'}]",context);assert.deepEqual(ids(),['B','C']);
+});
+
+test('PR suggestion table contains only requested data columns plus selection and add controls',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.dashboard=[];state.prRows=[];$('#prSuggestedTable').querySelectorAll=()=>[];renderTable=(table,columns)=>{state.testSuggestionColumns=columns.map(c=>c[0]);};renderPrSuggestions();`,context);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.testSuggestionColumns)',context)),['select','status','name','qty_main_display','order_qty','actions']);
+});

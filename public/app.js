@@ -599,28 +599,31 @@ function renderPrSuggestions() {
   if (!table) return;
   const rows = suggestedPrRows();
   renderTable(table, [
-    ["select", ""], ["status", "สถานะ"], ["name", "ชื่อ"], ["expiry", "Expire"],
-    ["qty_main_display", "Stock ปัจจุบัน"], ["reorder_point_sub", "Safety Stock"], ["supplier", "Supplier"],
-    ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["reason", "เหตุผล"], ["actions", "เพิ่ม"],
+    ["select", ""], ["status", "สถานะ"], ["name", "ชื่อ"], ["qty_main_display", "Stock ปัจจุบัน"], ["order_qty", "จำนวนสั่ง"], ["actions", "เพิ่ม"],
   ], rows.map((row) => ({
     ...row,
     select: row.item_id,
-    order_qty: defaultPrQty(row),
+    order_qty: state.prSuggestionQuantities?.[row.item_id] ?? defaultPrQty(row),
     unit: row.main_unit || row.sub_unit || "",
     reason: prReason(row),
     actions: row.item_id,
   })), {
     select: (_, row) => `<input class="row-check pr-suggest-check" type="checkbox" value="${esc(row.item_id)}">`,
     status: (v) => `<span class="badge ${v}">${v}</span>`,
-    order_qty: (v, row) => `<input class="table-input pr-suggest-qty" data-pr-qty="${esc(row.item_id)}" type="number" min="1" value="${esc(v)}">`,
+    name: (v,row)=>`<button type="button" class="pr-detail-link" data-pr-suggest-detail="${esc(row.item_id)}" aria-label="ดูรายละเอียด ${esc(v)}">${esc(v)}</button>`,
+    order_qty: (v, row) => `<div class="pr-suggest-quantity"><input class="table-input pr-suggest-qty" aria-label="จำนวนสั่ง ${esc(row.name)}" data-pr-qty="${esc(row.item_id)}" type="number" min="1" step="1" value="${esc(v)}"><span>${esc(row.main_unit||row.sub_unit||'')}</span></div>`,
     actions: (_, row) => `<button data-add-pr-suggest="${esc(row.item_id)}" type="button">เพิ่ม</button>`,
   }, (row) => row.status);
+  $$('[data-pr-qty]',table).forEach(input=>input.addEventListener('input',()=>{state.prSuggestionQuantities??={};state.prSuggestionQuantities[input.dataset.prQty]=input.value;}));
+  $$('[data-pr-suggest-detail]',table).forEach(button=>button.addEventListener('click',()=>openPrSuggestionDetails(button.dataset.prSuggestDetail)));
   $$("[data-add-pr-suggest]").forEach((btn) => btn.addEventListener("click", () => addPrSuggestion(btn.dataset.addPrSuggest)));
 }
 
 function suggestedPrRows() {
   const source = $("#prSource")?.value || "expiring";
+  const drafted=new Set(state.prRows.map(row=>row.item_id).filter(Boolean));
   return state.dashboard.filter((row) => {
+    if(drafted.has(row.item_id))return false;
     const expiring = ["EXPIRING", "EXPIRED"].includes(row.status);
     const reorder = ["REORDER", "CRITICAL"].includes(row.status);
     if (source === "reorder_point") return row.status === "REORDER";
@@ -633,7 +636,7 @@ function suggestedPrRows() {
 function addSelectedPrSuggestions() {
   const ids = $$(".pr-suggest-check:checked").map((box) => box.value);
   if (!ids.length) return toast("กรุณาเลือกรายการที่ต้องการเพิ่มเข้าใบ PR", true);
-  ids.forEach(addPrSuggestion);
+  ids.forEach(id=>addPrSuggestion(id,false));
   renderPurchaseRequisition();
   toast("เพิ่มรายการที่เลือกเข้าใบ PR แล้ว");
 }
@@ -641,12 +644,12 @@ function addSelectedPrSuggestions() {
 function addAllVisiblePrSuggestions() {
   const rows = suggestedPrRows();
   if (!rows.length) return toast("ไม่มีรายการแนะนำที่แสดงอยู่", true);
-  rows.forEach((row) => addPrSuggestion(row.item_id));
+  rows.forEach((row) => addPrSuggestion(row.item_id,false));
   renderPurchaseRequisition();
   toast(`เพิ่มรายการทั้งหมดที่แสดงเข้าใบ PR แล้ว (${rows.length} รายการ)`);
 }
 
-function addPrSuggestion(itemId) {
+function addPrSuggestion(itemId,refresh=true) {
   const row = suggestedPrRows().find((item) => item.item_id === itemId);
   if (!row) return;
   const qtyInput = $(`[data-pr-qty="${CSS.escape(itemId)}"]`);
@@ -671,7 +674,7 @@ function addPrSuggestion(itemId) {
       source: "stock",
     });
   }
-  renderPurchaseRequisition();
+  if(refresh)renderPurchaseRequisition();
 }
 
 function openManualPrDialog() {
@@ -763,6 +766,7 @@ function renderPurchaseRequisition() {
   });
   $$("[data-pr-edit]").forEach((input) => input.addEventListener("input", updatePrRow));
   $$("[data-delete-pr]").forEach((btn) => btn.addEventListener("click", () => deletePrRow(btn.dataset.deletePr)));
+  renderPrSuggestions();
 }
 
 function updatePrRow(e) {
@@ -773,6 +777,7 @@ function updatePrRow(e) {
 }
 
 function deletePrRow(id) {
+  const removed=state.prRows.find(row=>row.id===id);if(removed?.item_id){state.prSuggestionQuantities??={};state.prSuggestionQuantities[removed.item_id]=removed.order_qty;}
   state.prRows = state.prRows.filter((row) => row.id !== id);
   renderPurchaseRequisition();
 }
@@ -1872,4 +1877,13 @@ async function saveExpiredDisposal(event){
   $('#expiredDisposalDialog').close();if($('#analyticsDetailsDialog').open)$('#analyticsDetailsDialog').close();
   await refreshDashboard();await refreshStock();['reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast(`ตัดทิ้งแล้ว ${res.quantity} ${res.unit} · Lot ${res.lot} · คงเหลือ ${res.remaining_sub} ${res.unit}`);
  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+}
+
+function openPrSuggestionDetails(itemId){
+ const row=state.dashboard.find(r=>r.item_id===itemId);if(!row)return;
+ const fields=[['สถานะ',row.status],['เครื่อง / ยี่ห้อ',row.machine],['Stock ปัจจุบัน',row.qty_main_display],['Lot',row.lot||'—'],['วันหมดอายุ',row.expiry?formatDateOnly(row.expiry):'—'],['จุดสั่งซื้อ ('+(row.sub_unit||'หน่วย')+')',row.reorder_point_sub],['Supplier',row.supplier||'ยังไม่ระบุ Supplier'],['หน่วยสั่งซื้อ',row.main_unit||row.sub_unit],['หน่วยตัดจริง',row.sub_unit],['อัตราแปลง',`${row.sub_per_main||1} ${row.sub_unit||''} / ${row.main_unit||''}`],['Lead Time',`${row.lead_time_days||0} วัน`],['เหตุผลแนะนำ',prReason(row)]];
+ if(canViewPrices())fields.push(['ราคาต่อหน่วยหลัก',money(row.main_unit_price)],['ราคาต่อหน่วยย่อย',money(row.unit_price)]);
+ $('#prSuggestionDetailsTitle').textContent=row.name;
+ $('#prSuggestionDetailsBody').innerHTML=fields.map(([label,value])=>`<div><p class="muted">${esc(label)}</p><strong>${esc(value??'—')}</strong></div>`).join('');
+ $('#prSuggestionDetailsDialog').showModal();
 }
