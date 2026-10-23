@@ -103,7 +103,16 @@ test('PR filters toggle independently and combine matches without duplicates',as
 test('stock value change uses closing minus opening and a shared symmetric scale',async()=>{
  const {context}=await workflowContext();
  const result=JSON.parse(vm.runInContext(`JSON.stringify(stockValueChanges([{item_id:'up',opening_value:100,closing_value:150},{item_id:'down',opening_value:200,closing_value:100},{item_id:'zero',opening_value:25,closing_value:25},{item_id:'round',opening_value:0.1,closing_value:0.3}]))`,context));
- assert.deepEqual(result.rows.map(r=>[r.item_id,r.change]),[['down',-100],['up',50],['round',0.2],['zero',0]]);assert.equal(result.max,100);
+ assert.deepEqual(result.rows.map(r=>[r.item_id,r.change]),[['up',50],['round',0.2],['zero',0],['down',-100]]);assert.equal(result.max,100);
  assert.equal(vm.runInContext('stockValueChanges([]).max',context),1);
  assert.equal(vm.runInContext('stockValueChanges([{opening_value:0,closing_value:0}]).rows[0].change',context),0);
+});
+
+
+test('value chart sorts signed changes and combines machine and supplier filters',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.chartTest=[{name:'B',machine:'M1',supplier:'S1',closing_value:50},{name:'A',machine:'M1',supplier:'S2',opening_value:100},{name:'C',machine:'M2',supplier:'S1',closing_value:10}];`,context);
+ const names=filters=>JSON.parse(vm.runInContext(`JSON.stringify(stockValueChanges(state.chartTest,${JSON.stringify(filters)}).rows.map(r=>r.name))`,context));
+ assert.deepEqual(names({sort:'desc'}),['B','C','A']);assert.deepEqual(names({sort:'asc'}),['A','C','B']);assert.deepEqual(names({sort:'name'}),['A','B','C']);
+ assert.deepEqual(names({machine:'M1',supplier:'S1'}),['B']);assert.deepEqual(names({machine:'M2',supplier:'S2'}),[]);
 });
