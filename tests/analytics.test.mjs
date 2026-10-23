@@ -46,3 +46,10 @@ test('period activity includes net-zero and zero-price movements but excludes ou
  assert.deepEqual(rows.filter(r=>r.has_movement).map(r=>r.item_id),['net-zero','free','adjust']);
  assert.equal(rows[0].opening_value,rows[0].closing_value);
 });
+
+
+test('this year starts January 1 and ends today including leap years',()=>{
+ assert.deepEqual(period(new URLSearchParams('period=year'),'2026-10-23'),{start:'2026-01-01',end:'2026-10-23',days:296});
+ assert.deepEqual(period(new URLSearchParams('period=year'),'2026-01-01'),{start:'2026-01-01',end:'2026-01-01',days:1});
+ assert.equal(period(new URLSearchParams('period=year'),'2024-12-31').days,366);
+});

@@ -3,6 +3,7 @@ export function period(params,today=new Date().toISOString().slice(0,10)){
  const mode=params.get('period')||'month';let end=today,start=today;
  if(mode==='week')start=new Date(Date.parse(today+'T00:00:00Z')-6*DAY).toISOString().slice(0,10);
  else if(mode==='month')start=today.slice(0,8)+'01';
+ else if(mode==='year')start=today.slice(0,4)+'-01-01';
  else if(mode==='custom'){start=params.get('start');end=params.get('end');}
  else if(mode!=='day')throw Object.assign(new Error('ช่วงเวลาไม่ถูกต้อง'),{status:400});
  const valid=d=>/^\d{4}-\d{2}-\d{2}$/.test(d||'')&&!isNaN(Date.parse(d))&&new Date(d).toISOString().slice(0,10)===d;
