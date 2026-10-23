@@ -53,3 +53,8 @@ test('this year starts January 1 and ends today including leap years',()=>{
  assert.deepEqual(period(new URLSearchParams('period=year'),'2026-01-01'),{start:'2026-01-01',end:'2026-01-01',days:1});
  assert.equal(period(new URLSearchParams('period=year'),'2024-12-31').days,366);
 });
+
+
+test('this quarter uses calendar quarter boundaries through today',()=>{
+ for(const [today,start,days] of [['2026-01-01','2026-01-01',1],['2026-03-31','2026-01-01',90],['2026-04-01','2026-04-01',1],['2026-07-31','2026-07-01',31],['2026-10-23','2026-10-01',23],['2024-03-31','2024-01-01',91]])assert.deepEqual(period(new URLSearchParams('period=quarter'),today),{start,end:today,days});
+});
