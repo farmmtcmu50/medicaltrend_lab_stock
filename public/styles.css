@@ -415,7 +415,7 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 }
 .grid-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(230px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 14px;
 }
 .stack { display: grid; gap: 12px; }
@@ -475,7 +475,7 @@ input:focus, select:focus, textarea:focus {
 .table-wrap.small { max-height: 34vh; }
 table {
   width: 100%;
-  min-width: 980px;
+  min-width: 0;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -484,7 +484,8 @@ th, td {
   border-bottom: 1px solid #edf2f7;
   text-align: left;
   vertical-align: middle;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 th {
   position: sticky;
@@ -524,7 +525,7 @@ tr.REORDER td { background: #eef5ff; }
 .badge.ACTIVE { background: #ddf7ed; color: var(--ok); }
 .badge.PENDING { background: #fff0c4; color: var(--warn); }
 .badge.APPROVED { background: #ddf7ed; color: var(--ok); }
-.row-actions { display: flex; gap: 6px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .row-check {
   width: 18px;
   min-height: 18px;
@@ -718,3 +719,57 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
 .pr-source-filters button { border-radius:999px; background:#fff; color:#475569; }
 .pr-source-filters button[aria-pressed="true"] { background:#2563eb; border-color:#2563eb; color:#fff; }
 .pr-source-filters button:focus-visible { outline:2px solid #1d4ed8; outline-offset:2px; }
+
+/* Keep wide data inside its scroll region and let compact tables fit their dialog. */
+.tab,.panel,.grid-form > *,label,.table-wrap { min-width:0; }
+.table-wrap { width:100%; max-width:100%; overscroll-behavior-inline:contain; scrollbar-gutter:stable; }
+.table-wrap:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+th { line-height:1.4; }
+td { min-width:64px; }
+td[data-key="name"],td[data-key="reagent_name"],td[data-key="item_name"] { min-width:170px; max-width:280px; }
+td[data-key="supplier"],td[data-key="vendor"],td[data-key="reason"],td[data-key="details"],td[data-key="note"] { min-width:140px; max-width:280px; }
+td[data-key="barcode"],td[data-key="parent_barcode"],td[data-key="operation_id"],td[data-key="target_id"],td[data-key="pr_no"] { min-width:150px; max-width:230px; }
+td[data-key="actions"],td[data-key="action"],td[data-key="dispose_action"] { min-width:100px; max-width:280px; }
+td[data-key="status"],td[data-key="qty_sub"],td[data-key="quantity"],td[data-key="order_qty"],td[data-key="received_qty"],td[data-key="remaining_qty"],td[data-key="expiry_date"],td[data-key="expiry"],td[data-key="timestamp"],td[data-key="created_at"] { white-space:nowrap; }
+td > button { max-width:100%; margin:3px 4px 3px 0; white-space:normal; }
+.table-input { width:100px; max-width:100%; }
+.table-input.wide { min-width:170px; width:220px; }
+.table-dialog { width:min(1200px,calc(100vw - 32px)); }
+dialog { max-width:calc(100vw - 24px); max-height:calc(100dvh - 32px); overflow:auto; }
+dialog > .panel { margin-bottom:0; }
+dialog h3,dialog h4 { overflow-wrap:anywhere; }
+dialog .table-wrap { max-height:min(58dvh,560px); margin:12px 0; }
+#prReceivingTable td:first-child { width:38%; }
+#prReceivingTable td:last-child { min-width:90px; }
+#prReceivingTable th,#prReceivingTable td { padding:10px; }
+.page-head { flex-wrap:wrap; }
+.page-head > div:first-child { min-width:0; flex:1 1 200px; }
+.toolbar { min-width:0; flex-wrap:wrap; overflow:visible; }
+.toolbar input { min-width:min(220px,100%); flex:1 1 220px; }
+.workbar-card { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:640px) {
+ .content { padding:12px; }
+ dialog,.analytics-dialog,.form-dialog { width:calc(100vw - 20px); max-width:calc(100vw - 20px); padding:12px; max-height:calc(100dvh - 20px); }
+ dialog .panel { padding:12px; }
+ .toolbar { width:100%; }
+ .toolbar input,.toolbar select { max-width:100%; }
+ .row-actions { min-width:110px; }
+ th,td { padding:9px 10px; }
+ td { font-size:13px; }
+ td[data-key="name"],td[data-key="reagent_name"],td[data-key="item_name"] { min-width:145px; }
+ .analytics-dialog .analytics-close { margin-bottom:10px; }
+}
+/* Keep row actions reachable while the remaining columns scroll. */
+th[data-key="actions"],th[data-key="action"],th[data-key="dispose_action"],
+#prReceivingTable th:last-child { right:0; z-index:3; border-left:1px solid var(--line); }
+td[data-key="actions"],td[data-key="action"],td[data-key="dispose_action"],
+#prReceivingTable td:last-child { position:sticky; right:0; z-index:2; background:#fff; border-left:1px solid var(--line); }
+#prReceivingTable th:last-child { position:sticky; }
+.badge { white-space:nowrap; flex-shrink:0; }
+td { overflow-wrap:normal; word-break:normal; }
+td[data-key="name"],td[data-key="reagent_name"],td[data-key="item_name"],td[data-key="supplier"],td[data-key="vendor"],td[data-key="reason"],td[data-key="details"],td[data-key="note"],td[data-key="barcode"],td[data-key="parent_barcode"],td[data-key="operation_id"],td[data-key="target_id"],td[data-key="pr_no"] { overflow-wrap:anywhere; }
+.row-actions { min-width:200px; max-width:250px; }
+.row-actions button { padding:8px 10px; white-space:nowrap; }
+th { min-width:72px; overflow-wrap:normal; word-break:normal; }
+th[data-key="select"] { width:44px; min-width:44px; }
+@media(max-width:640px) { .row-actions { min-width:110px; max-width:150px; } }

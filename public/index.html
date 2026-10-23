@@ -444,7 +444,7 @@
   </dialog>
 
   <dialog id="prSuggestionDetailsDialog" class="form-dialog"><div class="panel"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="prSuggestionDetailsTitle">รายละเอียดน้ำยา</h3><div id="prSuggestionDetailsBody" class="grid-form"></div></div></dialog>
-  <dialog id="manualPrDialog" class="form-dialog">
+  <dialog id="manualPrDialog" class="form-dialog table-dialog">
     <div class="stack">
       <div class="dialog-head">
         <div>
@@ -474,8 +474,8 @@
     </form>
   </dialog>
 
-  <dialog id="operationDetailsDialog" class="form-dialog"><div class="panel"><h3>QR ในรายการ</h3><div id="operationDetailsRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
-  <dialog id="prReceivingDialog" class="form-dialog"><div class="panel"><h3 id="prReceivingTitle">รับของจาก PR</h3><label>สินค้าสำหรับบรรทัดที่เพิ่มเอง<select id="prReceiptItem"></select></label><div id="prReceivingRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
+  <dialog id="operationDetailsDialog" class="form-dialog table-dialog"><div class="panel"><h3>QR ในรายการ</h3><div id="operationDetailsRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
+  <dialog id="prReceivingDialog" class="form-dialog table-dialog"><div class="panel"><h3 id="prReceivingTitle">รับของจาก PR</h3><label>สินค้าสำหรับบรรทัดที่เพิ่มเอง<select id="prReceiptItem"></select></label><div id="prReceivingRows" class="table-wrap"></div><form method="dialog"><button>ปิด</button></form></div></dialog>
   <div id="workflowLabels" class="workflow-labels panel" hidden><span>มี QR จากรายการล่าสุด</span><button id="printWorkflowLabels">พิมพ์ QR ล่าสุด</button></div>
   <aside id="pendingStockWrite" class="pending-write panel hidden" role="status"><strong>มีรายการที่ยังไม่ได้ยืนยันผล ห้ามบันทึกซ้ำด้วยรายการใหม่</strong><p id="pendingStockText"></p><button id="checkPendingWrite">ตรวจสถานะ</button><button id="retryPendingWrite">ส่งคำขอเดิมอีกครั้ง</button></aside>
   <script src="/app.js" type="module"></script>

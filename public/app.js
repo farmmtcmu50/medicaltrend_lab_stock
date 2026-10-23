@@ -1435,6 +1435,7 @@ async function refreshAudit() {
 }
 
 function renderTable(table, cols, rows, formatters = {}, rowClass = null) {
+  const wrap=table.closest('.table-wrap');if(wrap){wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label','ตารางข้อมูล เลื่อนดูคอลัมน์เพิ่มเติมได้');}
   table.innerHTML = `<thead><tr>${cols.map(([k, label]) => `<th data-key="${k}">${label}</th>`).join("")}</tr></thead><tbody></tbody>`;
   const tbody = $("tbody", table);
   tbody.innerHTML = rows.map((row) => `<tr class="${rowClass ? rowClass(row) : ""}">${cols.map(([k]) => {
@@ -1729,9 +1730,10 @@ function updateReceiptHint(){
 }
 async function openPrReceiving(prId){
  const row=state.prRequests.find(r=>r.pr_id===prId);if(!row)return;
- const rows=row.items.map(line=>`<tr><td>${esc(line.item_name)}</td><td>${line.order_qty}</td><td>${line.received_qty||0}</td><td>${Number(line.order_qty)-Number(line.received_qty||0)}</td><td>${esc(line.unit)}</td><td>${Number(line.received_qty||0)<Number(line.order_qty)?`<button data-open-pr-line="${esc(line.line_id)}">รับเข้า</button>`:'ครบแล้ว'}</td></tr>`).join('');
  $('#prReceivingTitle').textContent=`รับของจาก ${row.pr_no}`;
- $('#prReceivingRows').innerHTML=`<table><thead><tr><th>รายการ</th><th>ขอซื้อ</th><th>รับแล้ว</th><th>ค้างรับ</th><th>หน่วย</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+ $('#prReceivingRows').innerHTML='<table id="prReceivingTable"></table>';
+ renderTable($('#prReceivingTable'),[['item_name','รายการ'],['order_qty','ขอซื้อ'],['received_qty','รับแล้ว'],['remaining_qty','ค้างรับ'],['unit','หน่วย'],['actions','รับสินค้า']],row.items.map(line=>({...line,received_qty:Number(line.received_qty||0),remaining_qty:Number(line.order_qty)-Number(line.received_qty||0)})),{actions:(_,line)=>line.remaining_qty>0?`<button type="button" data-open-pr-line="${esc(line.line_id)}">รับเข้า</button>`:'ครบแล้ว'});
+ $('#prReceiptItem').closest('label').hidden=!row.items.some(line=>!line.item_id);
  $('#prReceivingDialog').showModal();
  $$('[data-open-pr-line]').forEach(button=>button.addEventListener('click',async()=>{
   const line=row.items.find(l=>l.line_id===button.dataset.openPrLine);
