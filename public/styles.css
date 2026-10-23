@@ -815,3 +815,25 @@ th[data-key="select"] { width:44px; min-width:44px; }
 #inventoryVisualBoard button:focus-visible { outline:2px solid var(--primary-dark); outline-offset:3px; }
 @media(max-width:1100px) { .visual-charts { grid-template-columns:minmax(0,1fr); } .visual-comparison { grid-row:auto; } .visual-scroll { max-height:340px; } .visual-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:640px) { .visual-kpis { gap:8px; } .visual-kpi,.visual-panel { padding:12px; } .visual-kpi > span { font-size:11px; } .visual-distribution { flex-direction:column; } .visual-legend { width:100%; } .visual-pair { grid-template-columns:minmax(75px,32%) minmax(0,1fr); gap:8px; } }
+
+/* Independent card heights keep short KPIs compact beside longer chart lists. */
+#dashboardCharts { display:block; columns:2; column-gap:16px; }
+#dashboardCharts .analytics-card { display:inline-block; width:100%; break-inside:avoid; vertical-align:top; margin:0 0 16px; padding:18px; border-radius:14px; }
+#dashboardCharts .analytics-card h3 { font-size:16px; }
+#dashboardCharts .analytics-card > p { margin:8px 0 12px; }
+#dashboardCharts .analytics-card .metric { font-size:32px; margin:10px 0; }
+#dashboardCharts .pie-layout { gap:16px; flex-wrap:nowrap; }
+#dashboardCharts .pie-layout > div:last-child { min-width:0; }
+#dashboardCharts .pie-layout p { margin:6px 0 0; }
+#dashboardCharts .analytics-pie { width:108px; height:108px; }
+#dashboardCharts .analytics-pie span { width:78px; height:78px; font-size:23px; }
+#dashboardCharts .analytics-bar { margin:9px 0; grid-template-columns:minmax(75px,1fr) 2fr 65px; }
+#dashboardCharts .analytics-heat span { padding:8px 5px; }
+@media(min-width:1600px) { #dashboardCharts { columns:3; } }
+@media(max-width:900px) { #dashboardCharts { columns:1; } }
+@media(max-width:480px) { #dashboardCharts .analytics-card { padding:14px; } #dashboardCharts .analytics-pie { width:94px; height:94px; } #dashboardCharts .analytics-pie span { width:68px; height:68px; font-size:21px; } }
+#dashboard > .summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+#dashboard > .summary-grid article { padding:14px 16px; }
+#dashboard > .summary-grid strong { font-size:28px; }
+@media(min-width:1400px) { #dashboard > .summary-grid { grid-template-columns:repeat(6,minmax(0,1fr)); } }
+@media(max-width:800px) { #dashboard > .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
