@@ -110,7 +110,7 @@ function bindUi() {
   $("#reportForm").q.addEventListener("keydown", enter(refreshReport));
   $("#printReportBtn").addEventListener("click", printReport);
   $$("[data-report-type]").forEach((btn) => btn.addEventListener("click", () => setReportType(btn.dataset.reportType)));
-  $("#prSource").addEventListener("change", renderPrSuggestions);
+  $$('[data-pr-source]').forEach(button=>button.addEventListener('click',()=>{ $('#prSource').value=button.dataset.prSource;renderPrSuggestions(); }));
   $("#refreshPrSuggestionsBtn").addEventListener("click", refreshPrSuggestions);
   $("#addSelectedPrBtn").addEventListener("click", addSelectedPrSuggestions);
   $("#addAllVisiblePrBtn").addEventListener("click", addAllVisiblePrSuggestions);
@@ -595,6 +595,7 @@ async function refreshPrSuggestions() {
 }
 
 function renderPrSuggestions() {
+  $$('[data-pr-source]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.prSource===($('#prSource').value||'expiring'))));
   const table = $("#prSuggestedTable");
   if (!table) return;
   const rows = suggestedPrRows();

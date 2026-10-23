@@ -714,3 +714,7 @@ dialog::backdrop { background: rgba(15, 23, 42, .42); }
 #prSuggestionDetailsBody p { margin:8px 0 4px; }
 #pr .page-head.compact { flex-wrap:wrap; }
 #pr .page-head.compact .toolbar { flex:1 1 600px; flex-wrap:wrap; overflow:visible; }
+.pr-source-filters { display:flex; flex-wrap:wrap; gap:8px; flex-basis:100%; }
+.pr-source-filters button { border-radius:999px; background:#fff; color:#475569; }
+.pr-source-filters button[aria-pressed="true"] { background:#2563eb; border-color:#2563eb; color:#fff; }
+.pr-source-filters button:focus-visible { outline:2px solid #1d4ed8; outline-offset:2px; }
