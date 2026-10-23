@@ -1,7 +1,7 @@
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export async function resolveSupplier(env,body,previous=null){
  const row=body.supplier_id?await env.DB.prepare('SELECT * FROM suppliers WHERE supplier_id=?').bind(String(body.supplier_id)).first():body.supplier?await env.DB.prepare('SELECT * FROM suppliers WHERE name=? COLLATE NOCASE').bind(String(body.supplier).trim()).first():null;
- if(!row||row.is_placeholder)throw fail('กรุณาเลือก Supplier จากทะเบียนก่อนบันทึกน้ำยา');
+ if(!row||row.is_placeholder)throw fail('กรุณาเลือก Supplier จากทะเบียนก่อนบันทึกสินค้า');
  if(!row.is_active&&row.supplier_id!==previous)throw fail('Supplier นี้ปิดใช้งานแล้ว กรุณาเลือกรายที่เปิดใช้งาน');
  return {supplier_id:row.supplier_id,supplier:row.name};
 }

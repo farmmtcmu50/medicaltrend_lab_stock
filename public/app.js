@@ -438,7 +438,7 @@ function renderReceiveItems() {
 
 async function openReceiveDialog(itemId) {
   const item = state.items.find((row) => row.item_id === itemId);
-  if (!item) return toast("ไม่พบรายการน้ำยา", true);
+  if (!item) return toast("ไม่พบรายการสินค้า", true);
   const form = $("#receiveForm");
   form.reset();
   form.item_id.value = item.item_id;
@@ -585,7 +585,7 @@ function printReport() {
     </style></head><body>
     <button onclick="window.print()">พิมพ์รายงาน</button>
     <header><img src="${esc(logoSrc)}" alt=""><div><h1>${title}</h1><p>${esc(labName)}</p><p>ช่วงวันที่ ${esc(meta.from || "")} ถึง ${esc(meta.to || "")}</p></div></header>
-    <div class="summary"><span>จำนวนรายการ: ${esc(meta.summary?.rows || 0)}</span><span>ผลรวมแยกหน่วย (ไม่รวมรายการที่กลับแล้ว): ${esc(Object.entries(meta.summary?.totals_by_unit||{}).map(([unit,qty])=>`${qty} ${unit}`).join(" / "))}</span><span>จำนวนชนิดน้ำยา: ${esc(meta.summary?.items || 0)}</span></div>
+    <div class="summary"><span>จำนวนรายการ: ${esc(meta.summary?.rows || 0)}</span><span>ผลรวมแยกหน่วย (ไม่รวมรายการที่กลับแล้ว): ${esc(Object.entries(meta.summary?.totals_by_unit||{}).map(([unit,qty])=>`${qty} ${unit}`).join(" / "))}</span><span>จำนวนชนิดสินค้า: ${esc(meta.summary?.items || 0)}</span></div>
     <table><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>Lot</th>${barcodeHeader}<th>จำนวน / หน่วย</th><th>ผู้ทำรายการ</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table>
     </body></html>`);
   win.document.close();
@@ -836,7 +836,7 @@ function supplierPrGroups(rows,suppliers){
  const groups=new Map();
  for(const row of rows){
   const supplier=suppliers.find(s=>!s.is_placeholder&&Number(s.is_active)&&s.name.toLowerCase()===String(row.supplier||'').trim().toLowerCase());
-  if(!supplier)throw new Error(`กรุณากำหนด Supplier ที่เปิดใช้งานให้ ${row.name||'รายการน้ำยา'}`);
+  if(!supplier)throw new Error(`กรุณากำหนด Supplier ที่เปิดใช้งานให้ ${row.name||'รายการสินค้า'}`);
   if(!Number.isFinite(Number(row.order_qty))||Number(row.order_qty)<=0)throw new Error(`จำนวนสั่งของ ${row.name} ต้องมากกว่าศูนย์`);
   if(!groups.has(supplier.supplier_id))groups.set(supplier.supplier_id,{supplier:supplier.name,rows:[]});
   groups.get(supplier.supplier_id).rows.push(row);
@@ -1059,10 +1059,10 @@ async function saveItem(e) {
   if (!data.has_sub_unit) { data.sub_unit = data.main_unit; data.sub_per_main = 1; data.unit_price = data.main_unit_price; }
   if (data.item_id) {
     await api(`/api/items/${encodeURIComponent(data.item_id)}`, { method: "PUT", body: data });
-    toast("บันทึกแก้ไขรายการน้ำยาแล้ว");
+    toast("บันทึกแก้ไขรายการสินค้าแล้ว");
   } else {
     await api("/api/items", { method: "POST", body: data });
-    toast("เพิ่มรายการน้ำยาแล้ว");
+    toast("เพิ่มรายการสินค้าแล้ว");
   }
   resetItemForm();
   $("#itemDialog").close();
@@ -1072,7 +1072,7 @@ async function saveItem(e) {
 function openNewItemDialog() {
   resetItemForm();
   renderSupplierOptions('');
-  $("#itemDialogTitle").textContent = "เพิ่มน้ำยาใหม่";
+  $("#itemDialogTitle").textContent = "เพิ่มสินค้าใหม่";
   $("#itemDialog").showModal();
   $("#itemForm").reagent_name.focus();
 }
@@ -1086,14 +1086,14 @@ function editItem(id) {
   form.has_sub_unit.checked = Number(item.has_sub_unit ?? 1) === 1;
   syncItemUnits();
   $("#saveItemBtn").textContent = "บันทึกแก้ไขรายการ";
-  $("#itemDialogTitle").textContent = "แก้ไขรายการน้ำยา";
+  $("#itemDialogTitle").textContent = "แก้ไขรายการสินค้า";
   $("#itemDialog").showModal();
   form.reagent_name.focus();
 }
 
 async function deleteItem(id) {
   const item = state.items.find((x) => x.item_id === id);
-  if (!(await confirmBox("ยืนยันลบรายการน้ำยา", `ต้องการลบ ${item?.reagent_name || id} ใช่ไหม?`))) return;
+  if (!(await confirmBox("ยืนยันลบรายการสินค้า", `ต้องการลบ ${item?.reagent_name || id} ใช่ไหม?`))) return;
   await api(`/api/items/${encodeURIComponent(id)}`, { method: "DELETE" });
   await Promise.all([refreshItems(), refreshDashboard()]);
   toast("ลบรายการแล้ว");
@@ -1106,7 +1106,7 @@ async function toggleItemActive(id) {
   const message = active
     ? `ตั้ง ${item?.reagent_name || id} เป็น Inactive ใช่ไหม? รายการนี้จะไม่แสดงใน Dashboard และไม่ถูกคำนวณสถานะ/มูลค่า Stock`
     : `เปิด ${item?.reagent_name || id} กลับมาเป็น Active ใช่ไหม? รายการนี้จะกลับไปคำนวณใน Dashboard ตามปกติ`;
-  if (!(await confirmBox(`ยืนยัน ${nextText} รายการน้ำยา`, message))) return;
+  if (!(await confirmBox(`ยืนยัน ${nextText} รายการสินค้า`, message))) return;
   await api(`/api/items/${encodeURIComponent(id)}/active`, { method: "PUT", body: { is_active: active ? 0 : 1 } });
   await Promise.all([refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock(), refreshAuditMaybe()]);
   toast(`เปลี่ยนสถานะเป็น ${nextText} แล้ว`);
@@ -1122,7 +1122,7 @@ function resetItemForm() {
   $("#itemForm").has_sub_unit.checked = false;
   syncItemUnits();
   $("#saveItemBtn").textContent = "บันทึกรายการ";
-  $("#itemDialogTitle").textContent = "เพิ่มน้ำยาใหม่";
+  $("#itemDialogTitle").textContent = "เพิ่มสินค้าใหม่";
 }
 
 function closeItemDialog() {
@@ -1291,7 +1291,7 @@ async function consume(data, options = {}) {
       data.package_quantity = qty;
     }
     if (preview.warnings.length && data.kind!=="DISPOSE") {
-      const ok = await confirmBox("แจ้งเตือน FEFO", `${preview.warnings.map(esc).join("<br>")}<br><br>ยืนยันว่าจะนำน้ำยา QR นี้ออกจาก stock ไปใช้จริงหรือไม่?`);
+      const ok = await confirmBox("แจ้งเตือน FEFO", `${preview.warnings.map(esc).join("<br>")}<br><br>ยืนยันว่าจะนำสินค้า QR นี้ออกจาก stock ไปใช้จริงหรือไม่?`);
       if (!ok) return;
       data.confirm_fefo = true;
     }
@@ -1407,7 +1407,7 @@ async function changeOwnPassword(e) {
 
 async function clearDatabase(e) {
   e.preventDefault();
-  if (!(await confirmBox("ลบข้อมูลใน Database ทั้งหมด", "ระบบจะลบ stock และซ่อนรายการน้ำยาทั้งหมด ยืนยันทำต่อ?"))) return;
+  if (!(await confirmBox("ลบข้อมูลใน Database ทั้งหมด", "ระบบจะลบ stock และซ่อนรายการสินค้าทั้งหมด ยืนยันทำต่อ?"))) return;
   await api("/api/clear", { method: "POST", body: formData(e.target) });
   await refreshAll();
   toast("ลบข้อมูลแล้ว");
@@ -1686,7 +1686,7 @@ function bindWorkflowUi(){
  $('#moreOperationsBtn').addEventListener('click',safe(()=>refreshOperations(true)));
  $('#refreshCountsBtn').addEventListener('click',safe(refreshCounts));
  $('#countForm').addEventListener('submit',safe(async event=>{
-  event.preventDefault();if(!$('#countForm').item_id.value){$('#countItemSearch').setCustomValidity('กรุณาเลือกน้ำยาจากผลการค้นหา');$('#countItemSearch').reportValidity();return;}const body=formData(event.target);
+  event.preventDefault();if(!$('#countForm').item_id.value){$('#countItemSearch').setCustomValidity('กรุณาเลือกสินค้าจากผลการค้นหา');$('#countItemSearch').reportValidity();return;}const body=formData(event.target);
   const res=await stockWrite('/api/stock-counts',body);
   toast(`บันทึกผลนับแล้ว: ในระบบ ${res.system_qty} / นับจริง ${res.counted_qty} / ต่าง ${res.difference}`);
   await refreshCounts();
@@ -1812,7 +1812,7 @@ function renderInventoryVisual(a,rows){
  const turnovers=list.filter(r=>r.turnover!==null&&Number.isFinite(r.turnover)).sort((a,b)=>b.turnover-a.turnover),maxTurn=Math.max(1,...turnovers.map(r=>r.turnover));
  const empty='<p class="visual-empty">ยังไม่มีมูลค่าสำหรับช่วงเวลานี้</p>';
  const itemButton=r=>`<button class="visual-name" data-visual-item="${esc(r.item_id)}" title="ดูรายละเอียด ${esc(r.name)}">${esc(r.name)}</button>`;
- host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>STOCK VALUE CHANGE</h3><p>มูลค่าปลายงวด − ต้นงวด · บาท · เฉพาะรายการที่มีการเคลื่อนไหวในงวด</p>${chartControls}<div class="visual-change-summary">ผลต่างรวมตามตัวกรอง <strong>${signed(Math.round(changeTotal*100)/100)}</strong> บาท · ${comparisons.length} รายการ</div><div class="visual-change-axis"><span>−${money(max)}</span><span>0</span><span>+${money(max)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-change-row">${itemButton(r)}<div class="visual-change-track" role="img" aria-label="${esc(r.name)} ผลต่าง ${signed(r.change)} บาท"><i title="${esc(r.name)} · ต้นงวด ${money(r.opening_value)} บาท · ปลายงวด ${money(r.closing_value)} บาท · ผลต่าง ${signed(r.change)} บาท" class="${r.change<0?'negative':'positive'}" style="left:${r.change<0?50-Math.abs(r.change)/max*50:50}%;width:${Math.abs(r.change)/max*50}%"></i></div><b class="visual-change-value ${r.change<0?'negative':r.change>0?'positive':''}">${signed(r.change)}</b></div>`).join(''):'<p class="visual-empty">ไม่มีรายการที่ตรงกับตัวกรอง</p>'}</div><div class="visual-change-legend"><span>← ลดลง (ลบ)</span><span>เพิ่มขึ้น (บวก) →</span></div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#e7edf5'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายน้ำยา · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
+ host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>STOCK VALUE CHANGE</h3><p>มูลค่าปลายงวด − ต้นงวด · บาท · เฉพาะรายการที่มีการเคลื่อนไหวในงวด</p>${chartControls}<div class="visual-change-summary">ผลต่างรวมตามตัวกรอง <strong>${signed(Math.round(changeTotal*100)/100)}</strong> บาท · ${comparisons.length} รายการ</div><div class="visual-change-axis"><span>−${money(max)}</span><span>0</span><span>+${money(max)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-change-row">${itemButton(r)}<div class="visual-change-track" role="img" aria-label="${esc(r.name)} ผลต่าง ${signed(r.change)} บาท"><i title="${esc(r.name)} · ต้นงวด ${money(r.opening_value)} บาท · ปลายงวด ${money(r.closing_value)} บาท · ผลต่าง ${signed(r.change)} บาท" class="${r.change<0?'negative':'positive'}" style="left:${r.change<0?50-Math.abs(r.change)/max*50:50}%;width:${Math.abs(r.change)/max*50}%"></i></div><b class="visual-change-value ${r.change<0?'negative':r.change>0?'positive':''}">${signed(r.change)}</b></div>`).join(''):'<p class="visual-empty">ไม่มีรายการที่ตรงกับตัวกรอง</p>'}</div><div class="visual-change-legend"><span>← ลดลง (ลบ)</span><span>เพิ่มขึ้น (บวก) →</span></div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#e7edf5'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายสินค้า · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
  host.querySelectorAll('[data-change-filter]').forEach(select=>select.addEventListener('change',()=>{state.valueChartFilters={...chartFilters,[select.dataset.changeFilter]:select.value};renderInventoryVisual(a,rows);host.querySelector(`[data-change-filter="${select.dataset.changeFilter}"]`)?.focus();}));
  host.querySelectorAll('[data-visual-item]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{item:button.dataset.visualItem})));
  host.querySelectorAll('[data-visual-machine]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{machine:button.dataset.visualMachine})));
@@ -1840,7 +1840,7 @@ function renderAnalytics(){
  const heat=`<span>เครื่อง / สาเหตุ</span>${reasons.map(r=>`<span>${esc(r)}</span>`).join('')}`+heatRows.map(r=>`<span>${esc(r.name)}</span>${r.values.map(v=>`<span style="background:rgba(239,68,68,${.08+.6*Math.min(1,Math.max(0,v)/maxWaste)})"><b>${money(v)}</b></span>`).join('')}`).join('');
  const nearMachines=[...new Set(a.near.map(r=>r.machine||'ไม่ระบุเครื่อง'))];
  const maxLots=Math.max(...nearMachines.map(machine=>a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine).length),1);
- const stacked=nearMachines.map(machine=>{const list=a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine);return `<div class="analytics-bar"><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูน้ำยาเครื่อง ${esc(machine)}">${esc(machine)}</button><div class="analytics-track" data-near-machine="${esc(machine)}">${nearBuckets.map((bucket,index)=>{const count=list.filter(r=>r.bucket===bucket).length;return count?`<button class="near-segment" data-near-machine="${esc(machine)}" data-near-bucket="${esc(bucket)}" title="${esc(machine)} · ${esc(bucket)}: ${count} Lot" aria-label="${esc(machine)} · ${esc(bucket)}: ${count} Lot" style="width:${count/maxLots*100}%;background:${colors[index]}"></button>`:'';}).join('')}</div><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูทั้งหมด ${list.length} Lot ของ ${esc(machine)}">${list.length} Lot</button></div>`;}).join('')||'<p>ไม่มี Lot ที่หมดอายุหรือใกล้หมดอายุภายใน 90 วัน</p>';
+ const stacked=nearMachines.map(machine=>{const list=a.near.filter(r=>(r.machine||'ไม่ระบุเครื่อง')===machine);return `<div class="analytics-bar"><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูสินค้าเครื่อง ${esc(machine)}">${esc(machine)}</button><div class="analytics-track" data-near-machine="${esc(machine)}">${nearBuckets.map((bucket,index)=>{const count=list.filter(r=>r.bucket===bucket).length;return count?`<button class="near-segment" data-near-machine="${esc(machine)}" data-near-bucket="${esc(bucket)}" title="${esc(machine)} · ${esc(bucket)}: ${count} Lot" aria-label="${esc(machine)} · ${esc(bucket)}: ${count} Lot" style="width:${count/maxLots*100}%;background:${colors[index]}"></button>`:'';}).join('')}</div><button class="near-machine" data-near-machine="${esc(machine)}" aria-label="ดูทั้งหมด ${list.length} Lot ของ ${esc(machine)}">${list.length} Lot</button></div>`;}).join('')||'<p>ไม่มี Lot ที่หมดอายุหรือใกล้หมดอายุภายใน 90 วัน</p>';
 
  const legend=nearBuckets.map((bucket,index)=>`<span style="color:${colors[index]}">● ${esc(bucket)}</span>`).join(' · ');
  const trendGroups=new Map();for(const l of leads){const month=l.received_date.slice(0,7);if(!trendGroups.has(month))trendGroups.set(month,[]);trendGroups.get(month).push(l.lead_days);}
@@ -1849,7 +1849,7 @@ function renderAnalytics(){
  const line=trend.length?`<svg class="analytics-trend" viewBox="0 0 300 120" role="img" aria-label="แนวโน้ม Lead Time รายเดือน"><polyline points="${points}" fill="none" stroke="#2563eb" stroke-width="3"/>${trend.map((r,i)=>{const x=trend.length===1?150:20+i*260/(trend.length-1),y=95-r.value/maxLead*75;return `<circle cx="${x}" cy="${y}" r="4" fill="#2563eb"/><text x="${x}" y="115" text-anchor="middle" font-size="9">${esc(r.name)}</text><text x="${x}" y="${y-8}" text-anchor="middle" font-size="10">${r.value.toFixed(1)}</text>`;}).join('')}</svg>`:'<p>ยังไม่มีรายการรับครบที่ระบุวันออก PO</p>';
  $('#analyticsPeriodNote').textContent=`ช่วงวิเคราะห์ ${a.range.start} ถึง ${a.range.end} (${a.range.days} วัน) • กรองตามเครื่องและคำค้นด้านบน`;
  $('#dashboardCharts').innerHTML=
- card('stockout','Stockout Rate','อัตรารายการน้ำยาหมดสต๊อก ณ ปัจจุบัน',pie(empty,all,'#ef4444'))+
+ card('stockout','Stockout Rate','อัตรารายการสินค้าหมดสต๊อก ณ ปัจจุบัน',pie(empty,all,'#ef4444'))+
  card('reorder','Reorder Point Trigger','คงเหลือ ≤ ROP รวมรายการที่หมดสต๊อก',pie(rop,all,'#f59e0b'))+
  (a.inventory?card('turnover','Inventory Turnover Ratio','มูลค่าใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย · แยกตามเครื่อง',bars(machines,' เท่า'),true)+
  card('doh','Days On Hand','มูลค่าปลายงวด ÷ มูลค่าใช้งานเฉลี่ยต่อวัน',`<strong class="metric">${used>0?(closing/(used/a.range.days)).toFixed(1)+' วัน':'คำนวณไม่ได้'}</strong><p>อ้างอิงการใช้ ${a.range.days} วัน • เป้าหมายตัวอย่าง 30–45 วัน ปรับตาม Lead Time</p>`,true)+
@@ -1862,11 +1862,11 @@ function renderAnalytics(){
 function openAnalyticsDetails(key,filter={}){
  if(key==='stockout'||key==='reorder'){state.dashboardCardFilter=key==='stockout'?'critical':'reorder';renderDashboardCardFilterState();renderDashboardTable();$('#dashboardStockDialog').showModal();return;}
  const a=state.analytics;let rows,columns,title;
- if(key==='near'){title='น้ำยาใกล้หมดอายุ / หมดอายุ'+(filter.machine?' · '+filter.machine:' · ทุกเครื่อง / ยี่ห้อ')+(filter.bucket?' · '+filter.bucket:'')+' (FEFO)';rows=nearExpiryRows(a.near,filter);columns=[['name','น้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['days','วันคงเหลือ'],['bucket','กลุ่ม'],['quantity','จำนวน'],['unit','หน่วย']];}
+ if(key==='near'){title='สินค้าใกล้หมดอายุ / หมดอายุ'+(filter.machine?' · '+filter.machine:' · ทุกเครื่อง / ยี่ห้อ')+(filter.bucket?' · '+filter.bucket:'')+' (FEFO)';rows=nearExpiryRows(a.near,filter);columns=[['name','สินค้า'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['days','วันคงเหลือ'],['bucket','กลุ่ม'],['quantity','จำนวน'],['unit','หน่วย']];}
  else if(key==='otif'||key==='lead'){
   title='การส่งมอบและระยะเวลารอของ — เอกสารที่อนุมัติ';rows=a.deliveries.map(d=>({...d,complete:d.complete?'รับครบ':'ยังไม่ครบ',on_time:d.eligible?(d.on_time?'ตรงเวลาและครบ':'ไม่ผ่าน'):'ยังไม่เข้าเกณฑ์ / วันที่ไม่ครบ',lead_days:d.lead_days??'—',actions:state.user.role==='admin'?`<button data-delivery="${esc(d.pr_id)}">กำหนดวันที่</button>`:''}));
   columns=[['pr_no','เอกสาร PR ที่อ้างอิง PO'],['vendor','Vendor'],['issued_date','ออก PO'],['expected_date','นัดส่ง'],['received_date','รับครบ'],['complete','สถานะ'],['on_time','OTIF ในช่วงที่เลือก'],['lead_days','Lead Time (วัน)'],['actions','วันที่']];
- }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=(a.inventory||[]).filter(r=>(!filter.item||r.item_id===filter.item)&&(!filter.machine||r.machine===filter.machine));columns=[['name','น้ำยา'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
+ }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=(a.inventory||[]).filter(r=>(!filter.item||r.item_id===filter.item)&&(!filter.machine||r.machine===filter.machine));columns=[['name','สินค้า'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
  if(key==='near'&&rows.some(row=>row.days<0)){columns.push(['dispose_action','ตัดทิ้ง']);rows=rows.map(row=>({...row,dispose_action:row.days<0?expiredDisposeButton(row.item_id,row.lot,row.expiry_date):''}));}
  $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{dispose_action:v=>v,actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
  $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
@@ -1884,12 +1884,12 @@ async function refreshSuppliers(){
  const response=await api('/api/suppliers');state.suppliers=response.rows;renderSupplierOptions();
  const q=$('#supplierSearch').value.trim().toLowerCase();
  const rows=response.rows.filter(s=>[s.name,s.contact_name,s.phone,s.email].some(v=>String(v||'').toLowerCase().includes(q)));
- renderTable($('#suppliersTable'),[['name','Supplier'],['contact_name','ผู้ติดต่อ'],['phone','โทรศัพท์'],['email','อีเมล'],['item_count','รายการน้ำยาที่ผูก'],['stock_items','รายการที่มี Stock'],['stock_lots','Lot ใน Stock'],['is_active','สถานะ'],['actions','จัดการ']],rows,{
+ renderTable($('#suppliersTable'),[['name','Supplier'],['contact_name','ผู้ติดต่อ'],['phone','โทรศัพท์'],['email','อีเมล'],['item_count','รายการสินค้าที่ผูก'],['stock_items','รายการที่มี Stock'],['stock_lots','Lot ใน Stock'],['is_active','สถานะ'],['actions','จัดการ']],rows,{
   is_active:(v,r)=>r.is_placeholder?'รอระบุผู้ขายจริง':v?'เปิดใช้งาน':'ปิดใช้งาน',
-  actions:(_,r)=>`<button data-supplier-view="${esc(r.supplier_id)}">น้ำยา / Stock</button> ${state.user.role==='admin'&&!r.is_placeholder?`<button data-supplier-edit="${esc(r.supplier_id)}">แก้ไข</button><button class="danger" data-supplier-delete="${esc(r.supplier_id)}">ลบ</button>`:''}`
+  actions:(_,r)=>`<button data-supplier-view="${esc(r.supplier_id)}">สินค้า / Stock</button> ${state.user.role==='admin'&&!r.is_placeholder?`<button data-supplier-edit="${esc(r.supplier_id)}">แก้ไข</button><button class="danger" data-supplier-delete="${esc(r.supplier_id)}">ลบ</button>`:''}`
  });
  $$('[data-supplier-view]').forEach(button=>button.addEventListener('click',()=>openSupplierDetails(button.dataset.supplierView).catch(e=>toast(e.message,true))));
- $$('[data-supplier-delete]').forEach(button=>button.addEventListener('click',async()=>{const row=state.suppliers.find(s=>s.supplier_id===button.dataset.supplierDelete);if(!await confirmBox('ลบ Supplier',`ลบ ${esc(row.name)} และย้ายรายการน้ำยา สต๊อก และการอ้างอิงเอกสาร ไปยัง “ยังไม่ระบุ Supplier” อัตโนมัติ โดยจำนวนสต๊อกไม่เปลี่ยน ต้องการดำเนินการหรือไม่?`))return;try{await api('/api/suppliers/'+encodeURIComponent(row.supplier_id),{method:'DELETE'});await Promise.all([refreshSuppliers(),refreshItems(),refreshDashboard()]);toast('ลบ Supplier และย้ายข้อมูลไปยังยังไม่ระบุ Supplier แล้ว');}catch(e){toast(e.message,true);}}));
+ $$('[data-supplier-delete]').forEach(button=>button.addEventListener('click',async()=>{const row=state.suppliers.find(s=>s.supplier_id===button.dataset.supplierDelete);if(!await confirmBox('ลบ Supplier',`ลบ ${esc(row.name)} และย้ายรายการสินค้า สต๊อก และการอ้างอิงเอกสาร ไปยัง “ยังไม่ระบุ Supplier” อัตโนมัติ โดยจำนวนสต๊อกไม่เปลี่ยน ต้องการดำเนินการหรือไม่?`))return;try{await api('/api/suppliers/'+encodeURIComponent(row.supplier_id),{method:'DELETE'});await Promise.all([refreshSuppliers(),refreshItems(),refreshDashboard()]);toast('ลบ Supplier และย้ายข้อมูลไปยังยังไม่ระบุ Supplier แล้ว');}catch(e){toast(e.message,true);}}));
  $$('[data-supplier-edit]').forEach(button=>button.addEventListener('click',()=>openSupplierForm(button.dataset.supplierEdit)));
 }
 function openSupplierForm(id){
@@ -1901,9 +1901,9 @@ async function openSupplierDetails(id){
  const res=await api('/api/suppliers/'+encodeURIComponent(id));
  $('#supplierDetailsTitle').textContent=res.supplier.name;
  $('#supplierDetailsContact').textContent=[res.supplier.contact_name,res.supplier.phone,res.supplier.email,res.supplier.address,res.supplier.note].filter(Boolean).join(' · ');
- renderTable($('#supplierItemsTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['main_unit','หน่วยหลัก'],['sub_unit','หน่วยตัดจริง'],['is_active','สถานะ'],['actions','จัดการ']],res.items,{is_active:v=>v?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,r)=>`<button data-supplier-item="${esc(r.item_id)}">แก้ไขน้ำยา / Supplier</button>`});
- renderTable($('#supplierPurchasedTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['received_qty','จำนวนสะสมในประวัติ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.purchased,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
- renderTable($('#supplierStockTable'),[['reagent_name','รายการน้ำยา'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['quantity','จำนวนคงเหลือ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.stock,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
+ renderTable($('#supplierItemsTable'),[['reagent_name','รายการสินค้า'],['machine','เครื่อง'],['main_unit','หน่วยหลัก'],['sub_unit','หน่วยตัดจริง'],['is_active','สถานะ'],['actions','จัดการ']],res.items,{is_active:v=>v?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,r)=>`<button data-supplier-item="${esc(r.item_id)}">แก้ไขสินค้า / Supplier</button>`});
+ renderTable($('#supplierPurchasedTable'),[['reagent_name','รายการสินค้า'],['machine','เครื่อง'],['received_qty','จำนวนสะสมในประวัติ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.purchased,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
+ renderTable($('#supplierStockTable'),[['reagent_name','รายการสินค้า'],['machine','เครื่อง'],['lot','Lot'],['expiry_date','หมดอายุ'],['quantity','จำนวนคงเหลือ'],['sub_unit','หน่วย'],['verified','ที่มาผู้ขาย']],res.stock,{verified:v=>v?'ระบุจากการรับเข้า':'อ้างอิงข้อมูลเดิม / ตรวจนับ'});
  $$('[data-supplier-item]').forEach(button=>button.addEventListener('click',async()=>{try{const res=await api('/api/items');state.items=res.rows;$('#supplierDetailsDialog').close();editItem(button.dataset.supplierItem);}catch(e){toast(e.message,true);}}));
  $('#supplierDetailsDialog').showModal();
 }
@@ -1931,11 +1931,11 @@ async function loadLotUnits(append=false){
 
 function nearExpiryRows(rows,filter={}){return rows.filter(row=>(!filter.machine||(row.machine||'ไม่ระบุเครื่อง')===filter.machine)&&(!filter.bucket||row.bucket===filter.bucket));}
 
-function expiredDisposeButton(itemId,lot='',expiry=''){return `<button class="danger" data-expired-dispose="${esc(itemId)}" data-lot="${esc(lot)}" data-expiry="${esc(expiry)}">ตัดน้ำยาทิ้ง</button>`;}
+function expiredDisposeButton(itemId,lot='',expiry=''){return `<button class="danger" data-expired-dispose="${esc(itemId)}" data-lot="${esc(lot)}" data-expiry="${esc(expiry)}">ตัดสินค้าทิ้ง</button>`;}
 async function openExpiredDisposal(itemId,lot,expiry){
  const res=await api('/api/item-lots?item_id='+encodeURIComponent(itemId)),today=new Date().toISOString().slice(0,10);
  const rows=res.rows.filter(r=>r.in_stock>0&&r.expiry_date<today);
- if(!rows.length){toast('ไม่มีน้ำยาหมดอายุคงเหลือแล้ว กรุณารีเฟรช Dashboard');await refreshDashboard();return;}
+ if(!rows.length){toast('ไม่มีสินค้าหมดอายุคงเหลือแล้ว กรุณารีเฟรช Dashboard');await refreshDashboard();return;}
  state.expiredDisposal={item:res.item,rows};const form=$('#expiredDisposalForm');form.reset();
  $('#expiredDisposalItem').textContent=res.item.reagent_name;
  form.lot_index.innerHTML=rows.map((r,index)=>`<option value="${index}">${esc(r.lot)} · ${esc(formatDateOnly(r.expiry_date))} · คงเหลือ ${r.in_stock} ${esc(res.item.sub_unit||res.item.main_unit)}</option>`).join('');
@@ -1950,7 +1950,7 @@ async function saveExpiredDisposal(event){
  event.preventDefault();const button=$('#saveExpiredDisposalBtn');if(button.disabled)return;button.disabled=true;
  try{
   const {item,rows}=state.expiredDisposal,form=event.target,row=rows[Number(form.lot_index.value)],quantity=Number(form.quantity.value),why=form.reason.value.trim();
-  if(!await confirmBox('ยืนยันตัดน้ำยาหมดอายุทิ้ง',`${esc(item.reagent_name)} · Lot ${esc(row.lot)} · หมดอายุ ${esc(formatDateOnly(row.expiry_date))}<br>จำนวน ${esc(quantity)} ${esc(item.sub_unit||item.main_unit)}<br>เหตุผล: ${esc(why)}<br>ต้องการบันทึกตัดทิ้งรายการนี้หรือไม่?`))return;
+  if(!await confirmBox('ยืนยันตัดสินค้าหมดอายุทิ้ง',`${esc(item.reagent_name)} · Lot ${esc(row.lot)} · หมดอายุ ${esc(formatDateOnly(row.expiry_date))}<br>จำนวน ${esc(quantity)} ${esc(item.sub_unit||item.main_unit)}<br>เหตุผล: ${esc(why)}<br>ต้องการบันทึกตัดทิ้งรายการนี้หรือไม่?`))return;
   const res=await stockWrite('/api/dispose-expired',{item_id:item.item_id,lot:row.lot,expiry_date:row.expiry_date,quantity,expected_count:row.in_stock,reason:why});
   $('#expiredDisposalDialog').close();if($('#analyticsDetailsDialog').open)$('#analyticsDetailsDialog').close();
   await refreshDashboard();await refreshStock();['reprint','reports','pr','settings'].forEach(tab=>state.stockViewsDirty.add(tab));toast(`ตัดทิ้งแล้ว ${res.quantity} ${res.unit} · Lot ${res.lot} · คงเหลือ ${res.remaining_sub} ${res.unit}`);

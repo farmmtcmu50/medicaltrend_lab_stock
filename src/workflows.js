@@ -68,7 +68,7 @@ export function stockWorkflow(env,user,helpers){
    const op=await begin(body,'DISPOSE');if(op.replay)return op.replay;
    const itemId=String(body.item_id||''),lot=String(body.lot||''),expiry=date(body.expiry_date),qty=integer(body.quantity,'จำนวนตัดทิ้ง'),why='หมดอายุ: '+reason(body.reason);
    if(expiry>=timestamp().slice(0,10))throw fail('รายการนี้ยังไม่หมดอายุ ไม่สามารถตัดทิ้งจากหน้าหมดอายุได้');
-   const item=await query('SELECT * FROM items WHERE item_id=?',itemId).first();if(!item)throw fail('ไม่พบรายการน้ำยา',404);
+   const item=await query('SELECT * FROM items WHERE item_id=?',itemId).first();if(!item)throw fail('ไม่พบรายการสินค้า',404);
    const signature=await snapshot(itemId,lot,expiry);
    const count=Number((await query("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND lot=? AND expiry_date=? AND status='IN_STOCK'",itemId,lot,expiry).first()).n);
    if(!count||count!==Number(body.expected_count)||qty>count)throw fail('ยอดคงเหลือเปลี่ยนไป กรุณาเปิดรายการใหม่และตรวจจำนวนก่อนตัดทิ้ง',409);
@@ -81,7 +81,7 @@ export function stockWorkflow(env,user,helpers){
   },
   async itemLots(params){
    const item=await query('SELECT item_id,reagent_name,sub_unit,main_unit,is_active FROM items WHERE item_id=? AND is_deleted=0',params.get('item_id')||'').first();
-   if(!item)throw fail('ไม่พบรายการน้ำยา',404);
+   if(!item)throw fail('ไม่พบรายการสินค้า',404);
    const rows=await query(`SELECT lot,expiry_date,COUNT(*) total,SUM(status='IN_STOCK') in_stock,SUM(status='USED') used,SUM(status='DISPOSED') disposed,SUM(status='ADJUSTED_OUT') adjusted_out,SUM(status='VOID') voided,MIN(received_at) first_received,MAX(received_at) last_received FROM stock_units WHERE item_id=? GROUP BY lot,expiry_date ORDER BY expiry_date,lot`,item.item_id).all();
    return {ok:true,item,rows:rows.results};
   },
@@ -113,7 +113,7 @@ export function stockWorkflow(env,user,helpers){
    const op=await begin(body,'RECEIVE');if(op.replay)return op.replay;
    const item=await activeItem(body.item_id), qty=integer(body.quantity,'จำนวน'), lot=String(body.lot||'').trim(),expiry=date(body.expiry_date);
    if(!lot||lot.length>100)throw fail('กรุณาระบุ Lot ไม่เกิน 100 ตัวอักษร');
-   if(!item.supplier_id||item.supplier_id==='SUP-UNASSIGNED')throw fail('กรุณาระบุ Supplier ในรายการน้ำยาก่อนรับเข้าคลัง');
+   if(!item.supplier_id||item.supplier_id==='SUP-UNASSIGNED')throw fail('กรุณาระบุ Supplier ในรายการสินค้าก่อนรับเข้าคลัง');
    const hasSub=Number(item.has_sub_unit??1)===1;
    const mode=hasSub&&body.unit_mode!=='main'?'sub':'main',factor=hasSub?item.sub_per_main:1;
    const total=integer(qty*(mode==='main'?factor:1),'จำนวนรวม');

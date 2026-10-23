@@ -1,6 +1,6 @@
 # Medical Trend Lab Stock on Cloudflare D1
 
-คู่มือนี้สำหรับนำโปรแกรม Stock น้ำยาเวอร์ชันเว็บขึ้น Cloudflare โดยใช้โดเมน `stock.medicaltrend.stream` และฐานข้อมูล Cloudflare D1
+คู่มือนี้สำหรับนำโปรแกรม Stock สินค้าเวอร์ชันเว็บขึ้น Cloudflare โดยใช้โดเมน `stock.medicaltrend.stream` และฐานข้อมูล Cloudflare D1
 
 ## สิ่งที่ต้องมี
 
@@ -105,7 +105,7 @@ npx wrangler d1 execute medical-trend-lab-stock --remote --file=./d1_import_from
 ## Features ที่มีในเวอร์ชันนี้
 
 - Login user และ role admin/staff
-- เพิ่ม/แก้ไข/ลบรายการน้ำยา
+- เพิ่ม/แก้ไข/ลบรายการสินค้า
 - ราคาต่อหน่วยย่อยและราคาต่อหน่วยหลักคำนวณกลับกันอัตโนมัติ
 - รับเข้าคลังพร้อม Lot และ Expire
 - สร้าง QR หน่วยย่อยหลายดวง หรือ QR หน่วยหลัก 1 ดวงที่ผูกหน่วยย่อย

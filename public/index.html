@@ -38,7 +38,7 @@
       </div>
       <nav>
         <button class="nav active" data-tab="dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13.5 9.2 8l3.7 3.6L20 4.5"/><path d="M4 19.5h16"/><path d="M5.5 16.5V19"/><path d="M10 13v6"/><path d="M14.5 15v4"/><path d="M19 10.5V19"/></svg></span>Dashboard</button>
-        <button class="nav" data-tab="items"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v5.2l-4.4 8A3.2 3.2 0 0 0 8.4 21h7.2a3.2 3.2 0 0 0 2.8-4.8L14 8.2V3"/><path d="M8 15h8"/><path d="M9.5 18h5"/></svg></span>รายการน้ำยา</button>
+        <button class="nav" data-tab="items"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v5.2l-4.4 8A3.2 3.2 0 0 0 8.4 21h7.2a3.2 3.2 0 0 0 2.8-4.8L14 8.2V3"/><path d="M8 15h8"/><path d="M9.5 18h5"/></svg></span>รายการสินค้า</button>
         <button class="nav" data-tab="suppliers"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V7l9-4v18M12 9h9v12M1 21h22M6 9h3M6 13h3M6 17h3M16 13h2M16 17h2"/></svg></span>ทะเบียน Supplier</button>
         <button class="nav" data-tab="receive"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="M12 12v8.5"/><path d="m4.5 8 7.5 4 7.5-4"/><path d="M12 3v5.5"/><path d="m9.5 6 2.5 2.5L14.5 6"/></svg></span>รับเข้าคลัง</button>
         <button class="nav" data-tab="reprint"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7V4h10v3"/><path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7z"/><path d="M9 17h6"/></svg></span>พิมพ์ QR ซ้ำ</button>
@@ -79,7 +79,7 @@
         <header class="page-head">
           <div>
             <h2>⚗ LAB INVENTORY &amp; TURNOVER ANALYTICS</h2>
-            <p class="muted">ภาพรวมคลังน้ำยาตามสถานะล่าสุด</p>
+            <p class="muted">ภาพรวมคลังสินค้าตามสถานะล่าสุด</p>
           </div>
           <div class="toolbar">
             <select id="dashboardPeriod" aria-label="ช่วงเวลาวิเคราะห์"><option value="day">วันนี้</option><option value="week">7 วันล่าสุด</option><option value="month" selected>เดือนนี้</option><option value="custom">กำหนดช่วงวัน</option></select>
@@ -105,7 +105,7 @@
         <p id="analyticsPeriodNote" class="muted"></p>
         <div id="dashboardCharts" class="analytics-grid"></div>
         <p class="muted">คลิกกราฟหรือการ์ดเพื่อดูรายละเอียด • สถานะสต๊อกและอายุคงเหลือเป็นข้อมูลปัจจุบัน • มูลค่าประมาณจากราคาปัจจุบัน ไม่ใช่ต้นทุนแยกล็อต • ค่าเฉลี่ยคลังใช้ (ยอดต้นงวด + ปลายงวด) ÷ 2</p>
-        <dialog id="dashboardStockDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3>รายละเอียดคลังน้ำยา</h3>        <details class="panel">
+        <dialog id="dashboardStockDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3>รายละเอียดคลังสินค้า</h3>        <details class="panel">
           <summary>เลือก Column ที่ต้องการแสดง</summary>
           <div id="dashboardColumns" class="check-grid"></div>
         </details>
@@ -118,20 +118,20 @@
         <dialog id="deliveryTermsDialog" class="form-dialog"><form id="deliveryTermsForm" class="panel stack"><h3>วันที่จัดซื้อ / นัดส่ง</h3><input name="pr_id" type="hidden"><label>วันออก PO<input name="issued_date" type="date" required></label><label>วันนัดส่ง<input name="expected_date" type="date" required></label><button class="primary">บันทึก</button><button type="button" id="closeDeliveryTerms">ยกเลิก</button></form></dialog>
       </section>
 
-      <section id="suppliers" class="tab"><header class="page-head"><div><h2>ทะเบียน Supplier</h2><p class="muted">น้ำยาประจำ Supplier และสต๊อกแยกตามผู้ขายที่รับเข้า</p></div><div class="toolbar"><input id="supplierSearch" placeholder="ค้นหาชื่อ / ผู้ติดต่อ / โทรศัพท์"><button id="supplierSearchBtn">ค้นหา</button><button id="newSupplierBtn" class="primary admin-only">เพิ่ม Supplier</button></div></header><p class="panel">ข้อมูลเดิมที่ไม่มีผู้ขายอยู่ใน “ยังไม่ระบุ Supplier” กรุณาผูกผู้ขายจริงในรายการน้ำยา • สต๊อกเดิมอ้างอิงผู้ขายจากข้อมูลน้ำยา ณ วันย้ายข้อมูล ไม่ใช่หลักฐานการซื้อย้อนหลัง</p><div class="table-wrap"><table id="suppliersTable" class="data-table sortable"></table></div></section>
+      <section id="suppliers" class="tab"><header class="page-head"><div><h2>ทะเบียน Supplier</h2><p class="muted">สินค้าประจำ Supplier และสต๊อกแยกตามผู้ขายที่รับเข้า</p></div><div class="toolbar"><input id="supplierSearch" placeholder="ค้นหาชื่อ / ผู้ติดต่อ / โทรศัพท์"><button id="supplierSearchBtn">ค้นหา</button><button id="newSupplierBtn" class="primary admin-only">เพิ่ม Supplier</button></div></header><p class="panel">ข้อมูลเดิมที่ไม่มีผู้ขายอยู่ใน “ยังไม่ระบุ Supplier” กรุณาผูกผู้ขายจริงในรายการสินค้า • สต๊อกเดิมอ้างอิงผู้ขายจากข้อมูลสินค้า ณ วันย้ายข้อมูล ไม่ใช่หลักฐานการซื้อย้อนหลัง</p><div class="table-wrap"><table id="suppliersTable" class="data-table sortable"></table></div></section>
       <section id="items" class="tab">
         <header class="page-head">
           <div>
-            <h2>รายการน้ำยา</h2>
+            <h2>รายการสินค้า</h2>
             <p class="muted">Lot และ Expire ระบุในขั้นตอนรับเข้าคลัง</p>
           </div>
           <div class="toolbar">
-            <input id="itemSearch" placeholder="ค้นหารายการน้ำยา">
-            <select id="itemMachineFilter" aria-label="Filter เครื่องในรายการน้ำยา">
+            <input id="itemSearch" placeholder="ค้นหารายการสินค้า">
+            <select id="itemMachineFilter" aria-label="Filter เครื่องในรายการสินค้า">
               <option value="">ทุกเครื่อง</option>
             </select>
             <button id="itemSearchBtn">ค้นหา</button>
-            <button id="openItemFormBtn" class="primary" type="button">เพิ่มน้ำยาใหม่</button>
+            <button id="openItemFormBtn" class="primary" type="button">เพิ่มสินค้าใหม่</button>
           </div>
         </header>
         <div class="table-wrap">
@@ -141,9 +141,9 @@
 
       <section id="receive" class="tab">
         <header class="page-head">
-          <div><h2>รับเข้าคลัง</h2><p class="muted">ค้นหาชื่อน้ำยา/เครื่อง แล้วเปิด popup เพื่อบันทึกรับเข้า</p></div>
+          <div><h2>รับเข้าคลัง</h2><p class="muted">ค้นหาชื่อสินค้า/เครื่อง แล้วเปิด popup เพื่อบันทึกรับเข้า</p></div>
           <div class="toolbar">
-            <input id="receiveItemSearch" placeholder="ค้นหาชื่อน้ำยา / เครื่อง / Supplier">
+            <input id="receiveItemSearch" placeholder="ค้นหาชื่อสินค้า / เครื่อง / Supplier">
             <button id="receiveItemSearchBtn" type="button">ค้นหา</button>
           </div>
         </header>
@@ -181,7 +181,7 @@
       <section id="counts" class="tab">
         <header class="page-head"><div><h2>ตรวจนับและปรับยอดสต๊อก</h2><p>นับเป็นหน่วยที่ใช้ตัดจริง แยกสินค้า Lot และวันหมดอายุ ผู้ดูแลตรวจผลต่างก่อนยืนยัน</p></div><button id="refreshCountsBtn">รีเฟรช</button></header>
         <form id="countForm" class="panel grid-form">
-          <label>ค้นหารายการน้ำยา<input id="countItemSearch" list="countItemOptions" placeholder="พิมพ์ชื่อรายการน้ำยา" autocomplete="off" required><datalist id="countItemOptions"></datalist><input name="item_id" type="hidden"></label>
+          <label>ค้นหารายการสินค้า<input id="countItemSearch" list="countItemOptions" placeholder="พิมพ์ชื่อรายการสินค้า" autocomplete="off" required><datalist id="countItemOptions"></datalist><input name="item_id" type="hidden"></label>
           <label>Lot ที่มีในคลัง<select id="countLotSelect"><option value="">ระบุ Lot / วันหมดอายุเอง</option></select></label>
           <label>Lot<input name="lot" required></label><label>วันหมดอายุ<input name="expiry_date" type="date" required></label>
           <label><span>ยอดนับจริง (<span id="countUnit">หน่วย</span>)</span><input name="counted_qty" type="number" min="0" max="1000000000" step="1" required></label>
@@ -212,12 +212,12 @@
         <header class="page-head">
           <div>
             <h2>รายงาน (Report)</h2>
-            <p class="muted">พิมพ์รายงานการรับน้ำยาและรายงานการตัด Stock ตามช่วงวันที่</p>
+            <p class="muted">พิมพ์รายงานการรับสินค้าและรายงานการตัด Stock ตามช่วงวันที่</p>
           </div>
           <button id="printReportBtn" type="button">พิมพ์รายงาน</button>
         </header>
         <div class="subnav panel">
-          <button class="subnav-btn active" type="button" data-report-type="receive">รายงานรับน้ำยา</button>
+          <button class="subnav-btn active" type="button" data-report-type="receive">รายงานรับสินค้า</button>
           <button class="subnav-btn" type="button" data-report-type="consume">รายงานนำไปใช้</button>
           <button class="subnav-btn" type="button" data-report-type="dispose">รายงานตัดทิ้ง</button>
           <button class="subnav-btn" type="button" data-report-type="adjustment">รายงานปรับยอด</button>
@@ -277,7 +277,7 @@
           <div class="page-head compact">
             <div>
               <h3>เพิ่มรายการเอง</h3>
-              <p class="muted">เลือกจากรายการน้ำยาที่มีอยู่ในฐานข้อมูลเท่านั้น</p>
+              <p class="muted">เลือกจากรายการสินค้าที่มีอยู่ในฐานข้อมูลเท่านั้น</p>
             </div>
             <button id="openManualPrDialogBtn" class="primary" type="button">ค้นหารายการ</button>
           </div>
@@ -389,23 +389,23 @@
     </section>
   </main>
 
-  <dialog id="expiredDisposalDialog" class="form-dialog"><form id="expiredDisposalForm" class="panel stack"><h3>ตัดน้ำยาหมดอายุทิ้ง</h3><p id="expiredDisposalItem"></p><label>Lot / วันหมดอายุ<select name="lot_index" required></select></label><p id="expiredDisposalBalance" class="muted"></p><label><span>จำนวนตัดทิ้ง (<span id="expiredDisposalUnit"></span>)</span><input name="quantity" type="number" min="1" max="2000" step="1" required></label><label>เหตุผล<input name="reason" value="น้ำยาหมดอายุ" minlength="3" maxlength="450" required></label><p class="muted">ระบบตัดเฉพาะ Lot ที่เลือก ไม่ตัด Lot อื่น บันทึกเป็นรายการตัดทิ้งแยกจากการนำไปใช้งาน</p><button class="danger" id="saveExpiredDisposalBtn">บันทึกตัดทิ้ง</button><button type="button" id="cancelExpiredDisposalBtn">ยกเลิก</button></form></dialog>
-  <dialog id="itemLotsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="itemLotsTitle">จัดการ Lot น้ำยา</h3><p class="muted">แยกตามเลข Lot และวันหมดอายุ • จำนวนเป็นหน่วยที่ใช้ตัดจริง • แก้ไขข้อมูลได้เฉพาะผู้ดูแล และ Lot ที่ยังอยู่ในคลังครบทุกหน่วย</p><div class="table-wrap"><table id="itemLotsTable"></table></div></dialog>
+  <dialog id="expiredDisposalDialog" class="form-dialog"><form id="expiredDisposalForm" class="panel stack"><h3>ตัดสินค้าหมดอายุทิ้ง</h3><p id="expiredDisposalItem"></p><label>Lot / วันหมดอายุ<select name="lot_index" required></select></label><p id="expiredDisposalBalance" class="muted"></p><label><span>จำนวนตัดทิ้ง (<span id="expiredDisposalUnit"></span>)</span><input name="quantity" type="number" min="1" max="2000" step="1" required></label><label>เหตุผล<input name="reason" value="สินค้าหมดอายุ" minlength="3" maxlength="450" required></label><p class="muted">ระบบตัดเฉพาะ Lot ที่เลือก ไม่ตัด Lot อื่น บันทึกเป็นรายการตัดทิ้งแยกจากการนำไปใช้งาน</p><button class="danger" id="saveExpiredDisposalBtn">บันทึกตัดทิ้ง</button><button type="button" id="cancelExpiredDisposalBtn">ยกเลิก</button></form></dialog>
+  <dialog id="itemLotsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="itemLotsTitle">จัดการ Lot สินค้า</h3><p class="muted">แยกตามเลข Lot และวันหมดอายุ • จำนวนเป็นหน่วยที่ใช้ตัดจริง • แก้ไขข้อมูลได้เฉพาะผู้ดูแล และ Lot ที่ยังอยู่ในคลังครบทุกหน่วย</p><div class="table-wrap"><table id="itemLotsTable"></table></div></dialog>
   <dialog id="lotUnitsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3>QR ใน Lot</h3><div class="table-wrap"><table id="lotUnitsTable"></table></div><button id="moreLotUnitsBtn" hidden>โหลด QR ถัดไป</button></dialog>
   <dialog id="editLotDialog" class="form-dialog"><form id="editLotForm" class="panel stack"><h3>แก้ไขเลข Lot / วันหมดอายุ</h3><label>เลข Lot ใหม่<input name="new_lot" maxlength="100" required></label><label>วันหมดอายุใหม่<input name="new_expiry_date" type="date" required></label><label>เหตุผล<input name="reason" minlength="3" maxlength="500" required></label><p class="muted">รหัส QR เดิมคงเดิม กรุณาพิมพ์ฉลากใหม่หลังแก้ไข การแก้ไขนี้ทำให้ต้องตรวจนับใหม่หากมีใบตรวจนับเดิมค้างอยู่</p><button class="primary">บันทึกการแก้ไข</button><button id="cancelEditLotBtn" type="button">ยกเลิก</button></form></dialog>
   <dialog id="supplierDialog" class="form-dialog"><form id="supplierForm" class="grid-form panel"><h3 class="span-2" id="supplierDialogTitle">เพิ่ม Supplier</h3><input name="supplier_id" type="hidden"><label>ชื่อ Supplier<input name="name" maxlength="200" required></label><label>ผู้ติดต่อ<input name="contact_name" maxlength="200"></label><label>โทรศัพท์<input name="phone" maxlength="200"></label><label>อีเมล<input name="email" type="email" maxlength="200"></label><label class="span-2">ที่อยู่<textarea name="address" maxlength="1000"></textarea></label><label class="span-2">หมายเหตุ<textarea name="note" maxlength="1000"></textarea></label><label>สถานะ<select name="is_active"><option value="1">เปิดใช้งาน</option><option value="0">ปิดใช้งาน</option></select></label><button class="primary">บันทึก Supplier</button><button type="button" id="cancelSupplierBtn">ยกเลิก</button></form></dialog>
-  <dialog id="supplierDetailsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="supplierDetailsTitle"></h3><p id="supplierDetailsContact"></p><h4>รายการน้ำยาที่ผูกกับ Supplier นี้</h4><div class="table-wrap"><table id="supplierItemsTable"></table></div><h4>รายการน้ำยาที่เคยรับเข้า / พบในข้อมูลเดิมจาก Supplier นี้</h4><div class="table-wrap"><table id="supplierPurchasedTable"></table></div><h4>รายการน้ำยาใน Stock ที่มาจาก Supplier นี้</h4><p class="muted">“อ้างอิงข้อมูลเดิม / ตรวจนับ” หมายถึงยังไม่มีหลักฐานรับเข้าที่ระบุผู้ขายโดยตรง การเปลี่ยน Supplier ของน้ำยาจะไม่ย้ายประวัติสต๊อกเดิม</p><div class="table-wrap"><table id="supplierStockTable"></table></div></dialog>
+  <dialog id="supplierDetailsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="supplierDetailsTitle"></h3><p id="supplierDetailsContact"></p><h4>รายการสินค้าที่ผูกกับ Supplier นี้</h4><div class="table-wrap"><table id="supplierItemsTable"></table></div><h4>รายการสินค้าที่เคยรับเข้า / พบในข้อมูลเดิมจาก Supplier นี้</h4><div class="table-wrap"><table id="supplierPurchasedTable"></table></div><h4>รายการสินค้าใน Stock ที่มาจาก Supplier นี้</h4><p class="muted">“อ้างอิงข้อมูลเดิม / ตรวจนับ” หมายถึงยังไม่มีหลักฐานรับเข้าที่ระบุผู้ขายโดยตรง การเปลี่ยน Supplier ของสินค้าจะไม่ย้ายประวัติสต๊อกเดิม</p><div class="table-wrap"><table id="supplierStockTable"></table></div></dialog>
   <dialog id="itemDialog" class="form-dialog">
     <form id="itemForm" class="grid-form form-panel">
       <div class="dialog-head span-2">
         <div>
           <p class="eyebrow">Reagent Master</p>
-          <h3 id="itemDialogTitle">เพิ่มน้ำยาใหม่</h3>
+          <h3 id="itemDialogTitle">เพิ่มสินค้าใหม่</h3>
         </div>
         <button type="button" id="cancelEditItemBtn" class="ghost">ปิด</button>
       </div>
       <input name="item_id" type="hidden">
-      <label>ชื่อน้ำยา<input name="reagent_name" required></label>
+      <label>ชื่อสินค้า<input name="reagent_name" required></label>
       <label>ใช้กับเครื่อง<input name="machine" value="Manual"></label>
       <label>หน่วยนับหลัก<input name="main_unit" placeholder="Box" required></label>
       <label class="span-2 unit-toggle"><span><input type="checkbox" name="has_sub_unit" role="switch"> ใช้หน่วยย่อย</span><small>เปิดเมื่อสินค้ามีหน่วยย่อย เช่น 1 กล่อง = 5 ขวด รายการที่มีประวัติสต๊อกแล้วต้องสร้างรายการใหม่หากต้องการเปลี่ยนหน่วย</small></label>
@@ -445,13 +445,13 @@
     </form>
   </dialog>
 
-  <dialog id="prSuggestionDetailsDialog" class="form-dialog"><div class="panel"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="prSuggestionDetailsTitle">รายละเอียดน้ำยา</h3><div id="prSuggestionDetailsBody" class="grid-form"></div></div></dialog>
+  <dialog id="prSuggestionDetailsDialog" class="form-dialog"><div class="panel"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="prSuggestionDetailsTitle">รายละเอียดสินค้า</h3><div id="prSuggestionDetailsBody" class="grid-form"></div></div></dialog>
   <dialog id="manualPrDialog" class="form-dialog table-dialog">
     <div class="stack">
       <div class="dialog-head">
         <div>
           <p class="eyebrow">Purchase Requisition</p>
-          <h3>ค้นหารายการน้ำยา</h3>
+          <h3>ค้นหารายการสินค้า</h3>
         </div>
         <button type="button" id="closeManualPrDialogBtn" class="ghost">ปิด</button>
       </div>

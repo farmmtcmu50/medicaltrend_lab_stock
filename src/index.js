@@ -457,7 +457,7 @@ async function createPurchaseRequisition(request,env,user){
 }
 async function splitPurchaseRequisitions(request,env,user){
  const body=await readBody(request),items=body.items;
- if(!Array.isArray(items)||!items.length||items.length>200)throw httpError('เลือกน้ำยา 1–200 รายการก่อนสร้าง PR แยก Supplier');
+ if(!Array.isArray(items)||!items.length||items.length>200)throw httpError('เลือกสินค้า 1–200 รายการก่อนสร้าง PR แยก Supplier');
  if(!/^[a-zA-Z0-9-]{16,80}$/.test(body.request_id||''))throw httpError('รหัสคำขอไม่ถูกต้อง');
  const fingerprint=hex(await crypto.subtle.digest('SHA-256',enc(JSON.stringify(body))));
  const replay=async()=>{
@@ -472,7 +472,7 @@ async function splitPurchaseRequisitions(request,env,user){
  const knownItems=new Set(((await env.DB.prepare(`SELECT item_id FROM items WHERE is_active=1 AND item_id IN (${itemIds.map(()=>'?').join(',')})`).bind(...itemIds).all()).results||[]).map(row=>row.item_id));
  const groups=new Map();
  for(const item of items){
-  if(!knownItems.has(String(item.item_id||'')))throw httpError('รายการน้ำยาไม่พบหรือถูกปิดใช้งาน กรุณารีเฟรช');
+  if(!knownItems.has(String(item.item_id||'')))throw httpError('รายการสินค้าไม่พบหรือถูกปิดใช้งาน กรุณารีเฟรช');
   const supplier=suppliers.find(s=>s.name.toLowerCase()===String(item.supplier||'').trim().toLowerCase());
   if(!supplier)throw httpError('กรุณากำหนด Supplier ที่เปิดใช้งานให้ทุกรายการก่อนสร้าง PR');
   if(!String(item.name||item.item_name||'').trim()||!String(item.item_id||'').trim()||!Number.isFinite(Number(item.order_qty))||Number(item.order_qty)<=0||!String(item.unit||'').trim()||!Number.isFinite(Number(item.unit_price||0))||Number(item.unit_price||0)<0)throw httpError('ชื่อรายการ จำนวน หน่วย หรือราคาไม่ถูกต้อง');
@@ -922,13 +922,13 @@ function stripPriceFields(row) {
 
 async function getActiveItem(env, itemId) {
   const item = await env.DB.prepare("SELECT * FROM items WHERE item_id = ? AND is_deleted = 0 AND is_active = 1").bind(itemId).first();
-  if (!item) throw httpError("ไม่พบรายการน้ำยาที่ active", 404);
+  if (!item) throw httpError("ไม่พบรายการสินค้าที่ active", 404);
   return item;
 }
 
 async function getExistingItem(env, itemId) {
   const item = await env.DB.prepare("SELECT * FROM items WHERE item_id = ? AND is_deleted = 0").bind(itemId).first();
-  if (!item) throw httpError("ไม่พบรายการน้ำยา", 404);
+  if (!item) throw httpError("ไม่พบรายการสินค้า", 404);
   return item;
 }
 
