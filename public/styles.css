@@ -837,3 +837,24 @@ th[data-key="select"] { width:44px; min-width:44px; }
 #dashboard > .summary-grid strong { font-size:28px; }
 @media(min-width:1400px) { #dashboard > .summary-grid { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 @media(max-width:800px) { #dashboard > .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* PR suggestions: filters beside results on desktop, above results on mobile. */
+#pr .pr-suggestions-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:22px; align-items:start; }
+.pr-filter-sidebar { min-width:0; display:flex; flex-direction:column; gap:14px; padding-right:22px; border-right:1px solid var(--line); }
+.pr-filter-sidebar h3 { margin:0; }
+.pr-filter-sidebar .muted { font-size:13px; }
+.pr-filter-sidebar .pr-source-filters { flex-direction:column; flex-basis:auto; }
+.pr-filter-sidebar .pr-source-filters button { border-radius:9px; justify-content:flex-start; text-align:left; white-space:normal; }
+.pr-filter-sidebar > button { font-size:13px; }
+.pr-suggestions-results { min-width:0; }
+.pr-suggestions-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-bottom:14px; }
+#prSuggestedTable th,#prSuggestedTable td { padding:10px; }
+#prSuggestedTable td[data-key="name"] { min-width:145px; }
+#prSuggestedTable td[data-key="order_qty"] { min-width:130px; }
+@media(max-width:1000px) {
+ #pr .pr-suggestions-layout { grid-template-columns:minmax(0,1fr); gap:16px; }
+ .pr-filter-sidebar { padding:0 0 16px; border-right:0; border-bottom:1px solid var(--line); }
+ .pr-filter-sidebar .pr-source-filters { flex-direction:row; }
+ .pr-filter-sidebar > button { align-self:flex-start; }
+ .pr-suggestions-actions { justify-content:flex-start; }
+}

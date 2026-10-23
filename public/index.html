@@ -251,27 +251,27 @@
           <label>ผู้ขอซื้อ<input name="requester"></label>
           <label>แผนก<input name="department" value="Laboratory"></label>
         </form>
-        <section class="panel">
-          <div class="page-head compact">
-            <div>
-              <h3>รายการแนะนำจาก Stock</h3>
-              <p class="muted">เลือกรายการใกล้หมดอายุ หรือใกล้หมด Stock เพื่อเพิ่มเข้าใบ PR</p>
+        <section class="panel pr-suggestions-layout">
+          <aside class="pr-filter-sidebar" aria-label="ตัวกรองรายการแนะนำ">
+            <h3>รายการแนะนำจาก Stock</h3>
+            <p class="muted">เลือกประเภทรายการเพื่อเพิ่มเข้าใบ PR</p>
+            <input id="prSource" type="hidden" value="expiring">
+            <div class="pr-source-filters" role="group" aria-label="ประเภทรายการแนะนำจาก Stock">
+              <button type="button" data-pr-source="expiring" aria-pressed="true">ใกล้หมดอายุ</button>
+              <button type="button" data-pr-source="reorder_point" aria-pressed="false">ถึง Reordering Point</button>
+              <button type="button" data-pr-source="reorder" aria-pressed="false">ใกล้หมด Stock</button>
+              <button type="button" data-pr-source="all" aria-pressed="false">ใกล้หมดอายุ + ใกล้หมด Stock</button>
             </div>
-            <div class="toolbar">
-              <input id="prSource" type="hidden" value="expiring">
-              <div class="pr-source-filters" role="group" aria-label="ประเภทรายการแนะนำจาก Stock">
-                <button type="button" data-pr-source="expiring" aria-pressed="true">ใกล้หมดอายุ</button>
-                <button type="button" data-pr-source="reorder_point" aria-pressed="false">ถึง Reordering Point</button>
-                <button type="button" data-pr-source="reorder" aria-pressed="false">ใกล้หมด Stock</button>
-                <button type="button" data-pr-source="all" aria-pressed="false">ใกล้หมดอายุ + ใกล้หมด Stock</button>
-              </div>
-              <button id="refreshPrSuggestionsBtn" type="button">รีเฟรชรายการแนะนำ</button>
+            <button id="refreshPrSuggestionsBtn" type="button">รีเฟรชรายการแนะนำ</button>
+          </aside>
+          <div class="pr-suggestions-results">
+            <div class="pr-suggestions-actions">
               <button id="addSelectedPrBtn" type="button">เพิ่มรายการที่เลือก</button>
               <button id="addAllVisiblePrBtn" class="primary" type="button">เพิ่มรายการทั้งหมดที่แสดง</button>
             </div>
-          </div>
-          <div class="table-wrap small">
-            <table id="prSuggestedTable" class="data-table sortable"></table>
+            <div class="table-wrap small">
+              <table id="prSuggestedTable" class="data-table sortable"></table>
+            </div>
           </div>
         </section>
         <section class="panel">
