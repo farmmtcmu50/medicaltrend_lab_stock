@@ -254,13 +254,12 @@
         <section class="panel pr-suggestions-layout">
           <aside class="pr-filter-sidebar" aria-label="ตัวกรองรายการแนะนำ">
             <h3>รายการแนะนำจาก Stock</h3>
-            <p class="muted">เลือกประเภทรายการเพื่อเพิ่มเข้าใบ PR</p>
+            <p class="muted">เลือกได้หลายประเภท • กดซ้ำเพื่อยกเลิก</p>
             <input id="prSource" type="hidden" value="expiring">
             <div class="pr-source-filters" role="group" aria-label="ประเภทรายการแนะนำจาก Stock">
               <button type="button" data-pr-source="expiring" aria-pressed="true">ใกล้หมดอายุ</button>
               <button type="button" data-pr-source="reorder_point" aria-pressed="false">ถึง Reordering Point</button>
               <button type="button" data-pr-source="reorder" aria-pressed="false">ใกล้หมด Stock</button>
-              <button type="button" data-pr-source="all" aria-pressed="false">ใกล้หมดอายุ + ใกล้หมด Stock</button>
             </div>
             <button id="refreshPrSuggestionsBtn" type="button">รีเฟรชรายการแนะนำ</button>
           </aside>

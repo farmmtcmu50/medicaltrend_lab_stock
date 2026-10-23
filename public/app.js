@@ -110,7 +110,7 @@ function bindUi() {
   $("#reportForm").q.addEventListener("keydown", enter(refreshReport));
   $("#printReportBtn").addEventListener("click", printReport);
   $$("[data-report-type]").forEach((btn) => btn.addEventListener("click", () => setReportType(btn.dataset.reportType)));
-  $$('[data-pr-source]').forEach(button=>button.addEventListener('click',()=>{ $('#prSource').value=button.dataset.prSource;renderPrSuggestions(); }));
+  $$('[data-pr-source]').forEach(button=>button.addEventListener('click',()=>{ togglePrSource(button.dataset.prSource);renderPrSuggestions(); }));
   $("#refreshPrSuggestionsBtn").addEventListener("click", refreshPrSuggestions);
   $("#addSelectedPrBtn").addEventListener("click", addSelectedPrSuggestions);
   $("#addAllVisiblePrBtn").addEventListener("click", addAllVisiblePrSuggestions);
@@ -595,7 +595,7 @@ async function refreshPrSuggestions() {
 }
 
 function renderPrSuggestions() {
-  $$('[data-pr-source]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.prSource===($('#prSource').value||'expiring'))));
+  $$('[data-pr-source]').forEach(button=>button.setAttribute('aria-pressed',String(prSources().has(button.dataset.prSource))));
   const table = $("#prSuggestedTable");
   if (!table) return;
   const rows = suggestedPrRows();
@@ -620,17 +620,21 @@ function renderPrSuggestions() {
   $$("[data-add-pr-suggest]").forEach((btn) => btn.addEventListener("click", () => addPrSuggestion(btn.dataset.addPrSuggest)));
 }
 
+function prSources(){
+ return new Set(($('#prSource')?.value??'expiring').split(',').filter(value=>['expiring','reorder_point','reorder'].includes(value)));
+}
+function togglePrSource(source){
+ const selected=prSources();if(selected.has(source))selected.delete(source);else selected.add(source);
+ $('#prSource').value=[...selected].join(',');
+}
 function suggestedPrRows() {
-  const source = $("#prSource")?.value || "expiring";
+  const sources=prSources();
   const drafted=new Set(state.prRows.map(row=>row.item_id).filter(Boolean));
   return state.dashboard.filter((row) => {
     if(drafted.has(row.item_id))return false;
     const expiring = ["EXPIRING", "EXPIRED"].includes(row.status);
     const reorder = ["REORDER", "CRITICAL"].includes(row.status);
-    if (source === "reorder_point") return row.status === "REORDER";
-    if (source === "reorder") return reorder;
-    if (source === "all") return expiring || reorder;
-    return expiring;
+    return (sources.has('expiring')&&expiring)||(sources.has('reorder_point')&&row.status==='REORDER')||(sources.has('reorder')&&reorder);
   });
 }
 
