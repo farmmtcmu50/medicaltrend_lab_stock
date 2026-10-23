@@ -892,3 +892,11 @@ th[data-key="select"] { width:44px; min-width:44px; }
 #itemsTable td[data-key="actions"] { width:1%; min-width:330px; max-width:none; }
 #itemsTable .row-actions { flex-wrap:nowrap; min-width:max-content; max-width:none; }
 #itemsTable .row-actions button { flex-shrink:0; }
+
+/* Place PR metadata beside the heading rather than across a separate full row. */
+.pr-heading-layout { display:grid; grid-template-columns:minmax(220px,1fr) minmax(0,1.65fr); gap:20px; align-items:start; margin-bottom:18px; }
+.pr-heading-layout > .page-head { margin:0; }
+#prMetaForm { margin:0; padding:16px; gap:10px 14px; }
+#prMetaForm label { font-size:13px; gap:5px; }
+#prMetaForm input { min-width:0; width:100%; }
+@media(max-width:1000px) { .pr-heading-layout { grid-template-columns:minmax(0,1fr); gap:14px; } }
