@@ -116,3 +116,11 @@ test('value chart sorts signed changes and combines machine and supplier filters
  assert.deepEqual(names({sort:'desc'}),['B','C','A']);assert.deepEqual(names({sort:'asc'}),['A','C','B']);assert.deepEqual(names({sort:'name'}),['A','B','C']);
  assert.deepEqual(names({machine:'M1',supplier:'S1'}),['B']);assert.deepEqual(names({machine:'M2',supplier:'S2'}),[]);
 });
+
+test('supplier PR preview groups chosen vendors and rejects unassigned or invalid quantities',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.suppliers=[{supplier_id:'A',name:'Alpha',is_active:1},{supplier_id:'B',name:'Beta',is_active:1},{supplier_id:'U',name:'Unknown',is_active:1,is_placeholder:1}];state.prRows=[{name:'one',supplier:'Alpha',order_qty:2},{name:'two',supplier:'Beta',order_qty:3},{name:'three',supplier:'alpha',order_qty:1}];`,context);
+ const groups=JSON.parse(vm.runInContext('JSON.stringify(supplierPrGroups(state.prRows,state.suppliers))',context));assert.deepEqual(groups.map(g=>[g.supplier,g.rows.length]),[['Alpha',2],['Beta',1]]);
+ assert.throws(()=>vm.runInContext("supplierPrGroups([{name:'bad',supplier:'Unknown',order_qty:1}],state.suppliers)",context));
+ assert.throws(()=>vm.runInContext("supplierPrGroups([{name:'bad',supplier:'Alpha',order_qty:0}],state.suppliers)",context));
+});

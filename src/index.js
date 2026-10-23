@@ -95,6 +95,7 @@ async function api(request, env) {
   if (method === "POST" && path === "/labels") return labelPdf(request, env);
   if (method === "GET" && path === "/reports") return movementReport(request, env, user);
   if (method === "GET" && path === "/purchase-requisitions") return listPurchaseRequisitions(env, user);
+  if (method === "POST" && path === "/purchase-requisitions/split") return splitPurchaseRequisitions(request, env, user);
   if (method === "POST" && path === "/purchase-requisitions") return createPurchaseRequisition(request, env, user);
   if (method === "PUT" && path.startsWith("/purchase-requisitions/") && !path.endsWith("/approve") && !path.endsWith("/unapprove")) return updatePurchaseRequisition(request, env, user, path.split("/")[2]);
   if (method === "DELETE" && path.startsWith("/purchase-requisitions/")) return deletePurchaseRequisition(env, user, path.split("/")[2]);
@@ -412,8 +413,7 @@ async function listPurchaseRequisitions(env, user) {
   return json({ ok: true, rows, can_view_prices: canViewPrices(user), can_approve_pr: canViewPrices(user) });
 }
 
-async function createPurchaseRequisition(request, env, user) {
-  const body = await readBody(request);
+function purchaseRequisitionBatch(body,env,user) {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
   const prId = nextId("PRQ");
@@ -447,9 +447,49 @@ async function createPurchaseRequisition(request, env, user) {
     ));
   });
   if (batch.length < 2) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
-  await env.DB.batch(batch);
-  await logAudit(env, user.username, "CREATE_PR", "purchase_requisition", prNo, "SUCCESS", { pr_id: prId, lines: batch.length - 1 });
-  return json({ ok: true, pr_id: prId, pr_no: prNo });
+  return {batch,pr_id:prId,pr_no:prNo};
+}
+async function createPurchaseRequisition(request,env,user){
+ const body=await readBody(request),result=purchaseRequisitionBatch(body,env,user);
+ await env.DB.batch(result.batch);
+ await logAudit(env,user.username,'CREATE_PR','purchase_requisition',result.pr_no,'SUCCESS',{pr_id:result.pr_id,lines:result.batch.length-1});
+ return json({ok:true,pr_id:result.pr_id,pr_no:result.pr_no});
+}
+async function splitPurchaseRequisitions(request,env,user){
+ const body=await readBody(request),items=body.items;
+ if(!Array.isArray(items)||!items.length||items.length>200)throw httpError('เลือกน้ำยา 1–200 รายการก่อนสร้าง PR แยก Supplier');
+ if(!/^[a-zA-Z0-9-]{16,80}$/.test(body.request_id||''))throw httpError('รหัสคำขอไม่ถูกต้อง');
+ const fingerprint=hex(await crypto.subtle.digest('SHA-256',enc(JSON.stringify(body))));
+ const replay=async()=>{
+  const row=await env.DB.prepare('SELECT * FROM pr_split_requests WHERE request_id=? AND username=?').bind(body.request_id,user.username).first();
+  if(!row)return null;
+  if(row.payload_hash!==fingerprint)throw httpError('คำขอนี้ถูกใช้กับข้อมูลอื่นแล้ว กรุณาเริ่มใหม่',409);
+  return json(JSON.parse(row.result_json));
+ };
+ const previous=await replay();if(previous)return previous;
+ const suppliers=(await env.DB.prepare('SELECT supplier_id,name FROM suppliers WHERE is_active=1 AND is_placeholder=0').all()).results||[];
+ const itemIds=[...new Set(items.map(item=>String(item.item_id||'')))];
+ const knownItems=new Set(((await env.DB.prepare(`SELECT item_id FROM items WHERE is_active=1 AND item_id IN (${itemIds.map(()=>'?').join(',')})`).bind(...itemIds).all()).results||[]).map(row=>row.item_id));
+ const groups=new Map();
+ for(const item of items){
+  if(!knownItems.has(String(item.item_id||'')))throw httpError('รายการน้ำยาไม่พบหรือถูกปิดใช้งาน กรุณารีเฟรช');
+  const supplier=suppliers.find(s=>s.name.toLowerCase()===String(item.supplier||'').trim().toLowerCase());
+  if(!supplier)throw httpError('กรุณากำหนด Supplier ที่เปิดใช้งานให้ทุกรายการก่อนสร้าง PR');
+  if(!String(item.name||item.item_name||'').trim()||!String(item.item_id||'').trim()||!Number.isFinite(Number(item.order_qty))||Number(item.order_qty)<=0||!String(item.unit||'').trim()||!Number.isFinite(Number(item.unit_price||0))||Number(item.unit_price||0)<0)throw httpError('ชื่อรายการ จำนวน หน่วย หรือราคาไม่ถูกต้อง');
+  if(!groups.has(supplier.supplier_id))groups.set(supplier.supplier_id,{supplier,items:[]});
+  groups.get(supplier.supplier_id).items.push({...item,supplier:supplier.name});
+ }
+ const results=[],statements=[];let sequence=0;
+ for(const {supplier,items:lines} of groups.values()){
+  sequence++;
+  const pr=purchaseRequisitionBatch({...body,pr_no:body.pr_no?String(body.pr_no).trim()+'-'+String(sequence).padStart(2,'0'):'',items:lines},env,user);
+  results.push({pr_id:pr.pr_id,pr_no:pr.pr_no,supplier:supplier.name,lines:lines.length});statements.push(...pr.batch);
+  statements.push(env.DB.prepare("INSERT INTO audit_logs (audit_id,timestamp,username,action,target_type,target_id,result,details) VALUES (?,?,?,?,?,?,?,?)").bind(nextId('AUD'),now(),user.username,'CREATE_PR','purchase_requisition',pr.pr_no,'SUCCESS',JSON.stringify({pr_id:pr.pr_id,lines:lines.length,split_request:body.request_id,supplier_id:supplier.supplier_id})));
+ }
+ const response={ok:true,rows:results};
+ statements.unshift(env.DB.prepare('INSERT INTO pr_split_requests(request_id,username,payload_hash,result_json,created_at) VALUES(?,?,?,?,?)').bind(body.request_id,user.username,fingerprint,JSON.stringify(response),now()));
+ try{await env.DB.batch(statements);}catch(error){const saved=await replay();if(saved)return saved;throw error;}
+ return json(response);
 }
 
 async function approvePurchaseRequisition(request, env, admin, prId) {

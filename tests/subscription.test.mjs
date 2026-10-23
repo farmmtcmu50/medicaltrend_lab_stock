@@ -424,3 +424,20 @@ test('dashboard expired disposal affects only selected expired lot and supports 
  assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM package_barcodes WHERE item_id=? AND status='IN_STOCK'").bind(item).first()).n,0);
  assert.equal((await wfPost('/api/dispose-expired',{...body,request_id:randomUUID()},cookie)).status,409);
 });
+
+test('split PR creates atomic supplier documents, validates all lines, and safely replays',async()=>{
+ const cookie=await wfAuth(),call=(path,body)=>tenantRequest('tenant-a',path,{method:'POST',cookie,body});
+ const s1=(await call('/api/suppliers',{name:'Split supplier A'})).data.supplier_id;
+ const s2=(await call('/api/suppliers',{name:'Split supplier B'})).data.supplier_id;
+ const i1=(await call('/api/items',{reagent_name:'Split reagent A',main_unit:'ขวด',has_sub_unit:0,main_unit_price:30,supplier_id:s1})).data.item_id;
+ const i2=(await call('/api/items',{reagent_name:'Split reagent B',main_unit:'ขวด',has_sub_unit:0,main_unit_price:40,supplier_id:s2})).data.item_id;
+ const body={request_id:randomUUID(),pr_no:'SPLIT-TEST',requester:'Requester',department:'Lab',request_date:'2026-10-23',items:[{item_id:i1,name:'Split reagent A',supplier:'Split supplier A',order_qty:2,unit:'ขวด',unit_price:30},{item_id:i2,name:'Split reagent B',supplier:'Split supplier B',order_qty:3,unit:'ขวด',unit_price:40}]};
+ const result=await call('/api/purchase-requisitions/split',body);assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.rows.length,2);assert.deepEqual(result.data.rows.map(r=>r.pr_no),['SPLIT-TEST-01','SPLIT-TEST-02']);
+ for(const r of result.data.rows){const pr=await aDb.prepare('SELECT * FROM purchase_requisitions WHERE pr_id=?').bind(r.pr_id).first();assert.equal(pr.status,'PENDING');assert.equal(pr.requester,'Requester');assert.equal(pr.department,'Lab');const lines=(await aDb.prepare('SELECT supplier FROM purchase_requisition_items WHERE pr_id=?').bind(r.pr_id).all()).results;assert.deepEqual(lines.map(l=>l.supplier),[r.supplier]);}
+ assert.deepEqual((await call('/api/purchase-requisitions/split',body)).data,result.data);
+ assert.equal((await call('/api/purchase-requisitions/split',{...body,department:'Changed'})).status,409);
+ assert.equal((await call('/api/purchase-requisitions/split',{...body,request_id:randomUUID(),pr_no:'SPLIT-BAD',items:[body.items[0],{...body.items[1],supplier:'Unknown'}]})).status,400);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM purchase_requisitions WHERE pr_no LIKE 'SPLIT-BAD%'").first()).n,0);
+ const failed=await call('/api/purchase-requisitions/split',{...body,request_id:randomUUID()});assert.notEqual(failed.status,200);assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM purchase_requisitions WHERE pr_no LIKE 'SPLIT-TEST%'").first()).n,2);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='CREATE_PR' AND target_id LIKE 'SPLIT-TEST%'").first()).n,2);
+});

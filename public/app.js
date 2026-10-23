@@ -119,6 +119,9 @@ function bindUi() {
   $("#manualPrSearchBtn").addEventListener("click", renderManualPrItems);
   $("#manualPrSearch").addEventListener("keydown", enter(renderManualPrItems));
   $("#printPrBtn").addEventListener("click", printPurchaseRequisition);
+  $('#splitPrBtn').addEventListener('click',previewSupplierPrs);
+  $('#closeSplitPrBtn').addEventListener('click',()=>$('#splitPrDialog').close());
+  $('#confirmSplitPrBtn').addEventListener('click',submitSupplierPrs);
   $("#submitPrBtn").addEventListener("click", submitPurchaseRequisition);
   $("#refreshPrRequestsBtn").addEventListener("click", refreshPurchaseRequisitions);
   $("#clearPrBtn").addEventListener("click", clearPurchaseRequisition);
@@ -752,6 +755,7 @@ function manualPrRowData(itemId, item) {
 }
 
 function renderPurchaseRequisition() {
+  $("#splitPrBtn")?.classList.toggle("hidden",Boolean(state.editingPrId));
   const columns = [
     ["name", "ชื่อสินค้า"], ["supplier", "Supplier"], ["current_stock", "Stock ปัจจุบัน"], ["lot", "Lot"],
     ["expiry", "Expire"], ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["unit_price", "ราคาประมาณ"],
@@ -826,6 +830,40 @@ function prRequestActions(row) {
   const edit = canEdit ? `<button data-edit-pr-request="${esc(row.pr_id)}" type="button">แก้ไข</button>` : "";
   const remove = canDelete ? `<button class="danger" data-delete-pr-request="${esc(row.pr_id)}" type="button">ลบ</button>` : "";
   return `<div class="row-actions">${isAdmin ? approve + unapprove : ""}${receive}${print}${edit}${remove}</div>`;
+}
+
+function supplierPrGroups(rows,suppliers){
+ const groups=new Map();
+ for(const row of rows){
+  const supplier=suppliers.find(s=>!s.is_placeholder&&Number(s.is_active)&&s.name.toLowerCase()===String(row.supplier||'').trim().toLowerCase());
+  if(!supplier)throw new Error(`กรุณากำหนด Supplier ที่เปิดใช้งานให้ ${row.name||'รายการน้ำยา'}`);
+  if(!Number.isFinite(Number(row.order_qty))||Number(row.order_qty)<=0)throw new Error(`จำนวนสั่งของ ${row.name} ต้องมากกว่าศูนย์`);
+  if(!groups.has(supplier.supplier_id))groups.set(supplier.supplier_id,{supplier:supplier.name,rows:[]});
+  groups.get(supplier.supplier_id).rows.push(row);
+ }
+ return [...groups.values()];
+}
+function previewSupplierPrs(){
+ try{
+  if(state.editingPrId)throw new Error('การแยก Supplier ใช้สำหรับสร้าง PR ใหม่ กรุณาจบการแก้ไขใบเดิมก่อน');
+  if(!state.prRows.length)throw new Error('กรุณาเพิ่มรายการในใบ PR ก่อน');
+  const groups=supplierPrGroups(state.prRows,state.suppliers||[]),meta=formData($('#prMetaForm'));
+  const body={...meta,items:JSON.parse(JSON.stringify(state.prRows))};
+  const payload=JSON.stringify(body);
+  if(state.splitPrPayload!==payload){state.splitPrPayload=payload;state.splitPrRequest={...body,request_id:crypto.randomUUID()};}
+  $('#splitPrPreview').innerHTML=`<p>สร้าง ${groups.length} ใบ · ${state.prRows.length} รายการ${meta.pr_no?' · เลขเอกสาร '+esc(meta.pr_no)+'-01, -02, …':' · ระบบออกเลข PR อัตโนมัติ'}</p>`+groups.map(group=>`<section class="panel"><h4>${esc(group.supplier)} · ${group.rows.length} รายการ</h4><ul>${group.rows.map(row=>`<li>${esc(row.name)} — ${esc(row.order_qty)} ${esc(row.unit)}</li>`).join('')}</ul></section>`).join('');
+  $('#splitPrError').textContent='';$('#splitPrDialog').showModal();
+ }catch(error){toast(error.message,true);}
+}
+async function submitSupplierPrs(){
+ const button=$('#confirmSplitPrBtn');if(button.disabled)return;button.disabled=true;$('#closeSplitPrBtn').disabled=true;
+ try{
+  const result=await api('/api/purchase-requisitions/split',{method:'POST',body:state.splitPrRequest});
+  $('#splitPrDialog').close();state.splitPrRequest=null;state.splitPrPayload='';resetPurchaseRequisitionEditor();
+  toast(`สร้าง PR แยก Supplier ${result.rows.length} ใบ เพื่อรออนุมัติแล้ว`);
+  await Promise.all([refreshPurchaseRequisitions(),refreshAuditMaybe()]);
+ }catch(error){$('#splitPrError').textContent=error.message+' · สามารถกดยืนยันเพื่อลองอีกครั้งได้';}
+ finally{button.disabled=false;$('#closeSplitPrBtn').disabled=false;}
 }
 
 async function submitPurchaseRequisition() {

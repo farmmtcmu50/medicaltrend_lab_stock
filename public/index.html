@@ -293,12 +293,14 @@
           <div class="button-row end pr-actions">
             <button id="clearPrBtn" type="button">ล้างใบ PR</button>
             <button id="cancelEditPrBtn" class="hidden" type="button">ยกเลิกแก้ไข</button>
+            <button id="splitPrBtn" class="primary" type="button">สร้าง PR แยกตาม Supplier</button>
             <button id="submitPrBtn" class="primary" type="button">ส่งใบ PR เพื่ออนุมัติ</button>
             <button id="printPrBtn" class="admin-only" type="button">พิมพ์ Draft</button>
           </div>
         </section>
       </section>
 
+      <dialog id="splitPrDialog" class="table-dialog"><h3>ตรวจสอบ PR แยกตาม Supplier</h3><p class="muted">สร้างเอกสารใหม่แยกตามผู้ขาย ทุกใบจะรออนุมัติ ไม่มีการตัดสต๊อก</p><div id="splitPrPreview"></div><p id="splitPrError" role="alert"></p><div class="button-row end"><button id="closeSplitPrBtn" type="button">ยกเลิก</button><button id="confirmSplitPrBtn" class="primary" type="button">ยืนยันสร้าง PR แยก Supplier</button></div></dialog>
       <section id="pr-list" class="tab">
         <header class="page-head">
           <div>
