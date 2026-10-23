@@ -1744,9 +1744,28 @@ async function openPrReceiving(prId){
  $('#prReceiptItem').innerHTML='<option value="">เลือกสินค้าเมื่อบรรทัด PR เพิ่มเอง</option>'+state.items.map(i=>`<option value="${esc(i.item_id)}">${esc(i.reagent_name)}</option>`).join('');
 }
 
+function renderInventoryVisual(a,rows){
+ const host=$('#inventoryVisualBoard');if(!host)return;
+ const list=a.inventory||[],sum=key=>list.reduce((total,row)=>total+Number(row[key]||0),0);
+ const opening=sum('opening_value'),closing=sum('closing_value'),average=sum('average_value'),used=sum('used_value');
+ const metric=(title,value,note,icon)=>`<article class="visual-kpi"><span>${title}<b aria-hidden="true">${icon}</b></span><strong>${value}</strong><small>${note}</small></article>`;
+ const colors=['#21e6cd','#29b6f6','#8b5cf6','#fbbf24','#fb7185','#a3e635'];
+ const groups=new Map();for(const r of list)groups.set(r.machine,(groups.get(r.machine)||0)+Math.max(0,Number(r.closing_value)||0));
+ const distribution=[...groups].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),total=distribution.reduce((s,[,v])=>s+v,0);
+ let offset=0;const stops=distribution.map(([,v],i)=>{const start=offset;offset+=v/total*100;return `${colors[i%colors.length]} ${start}% ${offset}%`;});
+ const comparisons=[...list].sort((a,b)=>Math.max(b.opening_value,b.closing_value)-Math.max(a.opening_value,a.closing_value)),max=Math.max(1,...list.flatMap(r=>[r.opening_value,r.closing_value]));
+ const turnovers=list.filter(r=>r.turnover!==null&&Number.isFinite(r.turnover)).sort((a,b)=>b.turnover-a.turnover),maxTurn=Math.max(1,...turnovers.map(r=>r.turnover));
+ const empty='<p class="visual-empty">ยังไม่มีมูลค่าสำหรับช่วงเวลานี้</p>';
+ const itemButton=r=>`<button class="visual-name" data-visual-item="${esc(r.item_id)}" title="ดูรายละเอียด ${esc(r.name)}">${esc(r.name)}</button>`;
+ host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>INITIAL vs. FINAL STOCK VALUE</h3><p>มูลค่าต้นงวดเทียบปลายงวด · บาท</p><div class="visual-key"><span>● ต้นงวด ${money(opening)}</span><span>● ปลายงวด ${money(closing)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-pair">${itemButton(r)}<div>${['opening_value','closing_value'].map(key=>`<div class="visual-barline"><i class="${key}" style="width:${Math.max(0,r[key])/max*100}%"></i><b>${money(r[key])}</b></div>`).join('')}</div></div>`).join(''):empty}</div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#203448'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายน้ำยา · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
+ host.querySelectorAll('[data-visual-item]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{item:button.dataset.visualItem})));
+ host.querySelectorAll('[data-visual-machine]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{machine:button.dataset.visualMachine})));
+}
+
 function renderAnalytics(){
  const a=state.analytics,rows=state.dashboard||[];
  if(!a)return;
+ renderInventoryVisual(a,rows);
  const all=rows.length,empty=rows.filter(r=>Number(r.qty_sub)<=0).length,rop=rows.filter(r=>Number(r.qty_sub)<=Number(r.reorder_point_sub)).length;
  const pct=(n,d)=>d>0?(n/d*100).toFixed(1)+'%':'ไม่มีข้อมูล';
  const pie=(n,d,color)=>`<div class="pie-layout"><div class="analytics-pie" style="background:conic-gradient(${color} 0 ${d?n/d*100:0}%,#e7edf5 0 100%)"><span>${pct(n,d)}</span></div><div><strong>${n} / ${d} รายการ</strong><p>นับเฉพาะรายการที่เปิดใช้งาน</p></div></div>`;
@@ -1791,7 +1810,7 @@ function openAnalyticsDetails(key,filter={}){
  else if(key==='otif'||key==='lead'){
   title='การส่งมอบและระยะเวลารอของ — เอกสารที่อนุมัติ';rows=a.deliveries.map(d=>({...d,complete:d.complete?'รับครบ':'ยังไม่ครบ',on_time:d.eligible?(d.on_time?'ตรงเวลาและครบ':'ไม่ผ่าน'):'ยังไม่เข้าเกณฑ์ / วันที่ไม่ครบ',lead_days:d.lead_days??'—',actions:state.user.role==='admin'?`<button data-delivery="${esc(d.pr_id)}">กำหนดวันที่</button>`:''}));
   columns=[['pr_no','เอกสาร PR ที่อ้างอิง PO'],['vendor','Vendor'],['issued_date','ออก PO'],['expected_date','นัดส่ง'],['received_date','รับครบ'],['complete','สถานะ'],['on_time','OTIF ในช่วงที่เลือก'],['lead_days','Lead Time (วัน)'],['actions','วันที่']];
- }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=a.inventory||[];columns=[['name','น้ำยา'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
+ }else{title=key==='wastage'?'รายละเอียดมูลค่ารับเข้า / ใช้งาน / ตัดทิ้ง':'รายละเอียดการหมุนเวียนและมูลค่าคลัง';rows=(a.inventory||[]).filter(r=>(!filter.item||r.item_id===filter.item)&&(!filter.machine||r.machine===filter.machine));columns=[['name','น้ำยา'],['machine','เครื่อง'],['opening_value','มูลค่าต้นงวด'],['closing_value','มูลค่าปลายงวด'],['average_value','มูลค่าเฉลี่ย'],['used_value','ใช้งานสุทธิ'],['received_value','รับเข้าสุทธิ'],['wasted_value','ตัดทิ้งสุทธิ'],['turnover','หมุนเวียน (เท่า)']];}
  if(key==='near'&&rows.some(row=>row.days<0)){columns.push(['dispose_action','ตัดทิ้ง']);rows=rows.map(row=>({...row,dispose_action:row.days<0?expiredDisposeButton(row.item_id,row.lot,row.expiry_date):''}));}
  $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{dispose_action:v=>v,actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
  $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
