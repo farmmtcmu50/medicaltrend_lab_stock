@@ -441,3 +441,11 @@ test('split PR creates atomic supplier documents, validates all lines, and safel
  const failed=await call('/api/purchase-requisitions/split',{...body,request_id:randomUUID()});assert.notEqual(failed.status,200);assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM purchase_requisitions WHERE pr_no LIKE 'SPLIT-TEST%'").first()).n,2);
  assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='CREATE_PR' AND target_id LIKE 'SPLIT-TEST%'").first()).n,2);
 });
+
+test('PR suggestions ignore dashboard search and analytics filters and protect staff prices',async()=>{
+ const cookie=await wfAuth();
+ const filtered=await tenantRequest('tenant-a','/api/dashboard?q=NO-MATCH-SEARCH-47',{cookie});assert.equal(filtered.status,200);assert.equal(filtered.data.rows.length,0);
+ const suggestions=await tenantRequest('tenant-a','/api/pr-suggestions?q=NO-MATCH-SEARCH-47&machine=NO-MATCH&period=invalid',{cookie});assert.equal(suggestions.status,200,JSON.stringify(suggestions.data));assert.ok(suggestions.data.rows.length>0);assert.equal(suggestions.data.analytics,null);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const publicRows=await tenantRequest('tenant-a','/api/pr-suggestions',{cookie:staff});assert.equal(publicRows.status,200);assert.ok(publicRows.data.rows.length>0);assert.equal(publicRows.data.analytics,null);assert.equal(publicRows.data.total_value,null);assert.equal(publicRows.data.rows[0].unit_price,undefined);
+});

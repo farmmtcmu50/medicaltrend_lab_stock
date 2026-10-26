@@ -94,6 +94,7 @@ async function api(request, env) {
   if (method === "POST" && path === "/consume") return consumeStock(request, env, user);
   if (method === "POST" && path === "/labels") return labelPdf(request, env);
   if (method === "GET" && path === "/reports") return movementReport(request, env, user);
+  if (method === "GET" && path === "/pr-suggestions") return dashboard(new Request(new URL("/api/pr-suggestions",request.url)), env, user, false);
   if (method === "GET" && path === "/purchase-requisitions") return listPurchaseRequisitions(env, user);
   if (method === "POST" && path === "/purchase-requisitions/split") return splitPurchaseRequisitions(request, env, user);
   if (method === "POST" && path === "/purchase-requisitions") return createPurchaseRequisition(request, env, user);
@@ -162,7 +163,7 @@ async function logout(env, request) {
   return json({ ok: true }, 200, { "set-cookie": `${env.SESSION_COOKIE || "mt_stock_session"}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}` });
 }
 
-async function dashboard(request, env, user) {
+async function dashboard(request, env, user, includeAnalytics=true) {
   const url = new URL(request.url);
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
   const machine = (url.searchParams.get("machine") || "").trim().toLowerCase();
@@ -211,7 +212,7 @@ async function dashboard(request, env, user) {
     ok: true,
     rows: canViewPrices(user) ? data : data.map(stripPriceFields),
     machines,
-    analytics: await analytics(env,url.searchParams,data,canViewPrices(user)),
+    analytics: includeAnalytics ? await analytics(env,url.searchParams,data,canViewPrices(user)) : null,
     expiring_days: expiringDays,
     total_value: canViewPrices(user) ? totalValue : null,
     can_view_prices: canViewPrices(user),

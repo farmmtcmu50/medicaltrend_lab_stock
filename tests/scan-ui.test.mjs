@@ -69,7 +69,7 @@ test('near-expiry drilldown filters by exact machine and expiry bucket without m
 
 test('PR suggestions move into draft, avoid duplicates, and return after removal or clearing',async()=>{
  const {context}=await workflowContext();context.CSS={escape:value=>value};
- vm.runInContext(`state.dashboard=[{item_id:'A',name:'A',status:'EXPIRED',main_unit:'Box',sub_unit:'Test',sub_per_main:5},{item_id:'B',name:'B',status:'EXPIRING',main_unit:'Bottle'},{item_id:'C',name:'C',status:'CRITICAL',main_unit:'Box'}];state.prRows=[];$('#prSource').value='expiring,reorder';renderPurchaseRequisition=()=>{};confirmBox=async()=>true;`,context);
+ vm.runInContext(`state.prSuggestionRows=[{item_id:'A',name:'A',status:'EXPIRED',main_unit:'Box',sub_unit:'Test',sub_per_main:5},{item_id:'B',name:'B',status:'EXPIRING',main_unit:'Bottle'},{item_id:'C',name:'C',status:'CRITICAL',main_unit:'Box'}];state.prRows=[];$('#prSource').value='expiring,reorder';renderPurchaseRequisition=()=>{};confirmBox=async()=>true;`,context);
  const ids=()=>JSON.parse(vm.runInContext('JSON.stringify(suggestedPrRows().map(r=>r.item_id))',context));
  assert.deepEqual(ids(),['A','B','C']);
  vm.runInContext(`$('[data-pr-qty="A"]').value='7';$('[data-pr-qty="B"]').value='9';addPrSuggestion('A');addPrSuggestion('A');`,context);
@@ -82,14 +82,14 @@ test('PR suggestions move into draft, avoid duplicates, and return after removal
 
 test('PR suggestion table contains only requested data columns plus selection and add controls',async()=>{
  const {context}=await workflowContext();
- vm.runInContext(`state.dashboard=[];state.prRows=[];$('#prSuggestedTable').querySelectorAll=()=>[];renderTable=(table,columns)=>{state.testSuggestionColumns=columns.map(c=>c[0]);};renderPrSuggestions();`,context);
+ vm.runInContext(`state.prSuggestionRows=[];state.prRows=[];$('#prSuggestedTable').querySelectorAll=()=>[];renderTable=(table,columns)=>{state.testSuggestionColumns=columns.map(c=>c[0]);};renderPrSuggestions();`,context);
  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.testSuggestionColumns)',context)),['select','status','name','qty_main_display','order_qty','actions']);
 });
 
 
 test('PR filters toggle independently and combine matches without duplicates',async()=>{
  const {context}=await workflowContext();
- vm.runInContext(`state.prRows=[];state.dashboard=['EXPIRED','EXPIRING','REORDER','CRITICAL','OK'].map((status,i)=>({item_id:String(i),status}));$('#prSource').value='expiring';`,context);
+ vm.runInContext(`state.prRows=[];state.prSuggestionRows=['EXPIRED','EXPIRING','REORDER','CRITICAL','OK'].map((status,i)=>({item_id:String(i),status}));$('#prSource').value='expiring';`,context);
  const ids=()=>JSON.parse(vm.runInContext('JSON.stringify(suggestedPrRows().map(r=>r.item_id))',context));
  assert.deepEqual(ids(),['0','1']);
  vm.runInContext("togglePrSource('reorder_point')",context);assert.deepEqual(ids(),['0','1','2']);
@@ -133,4 +133,15 @@ test('zero changes are excluded for all and specific vendors and machines in eve
   const filters=JSON.stringify({sort,machine,supplier});
   assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(stockValueChanges(state.chartTest,${filters}).rows.map(r=>r.name))`,context)),['moving']);
  }
+});
+
+
+test('PR refresh ignores dashboard filters and never changes dashboard data',async()=>{
+ const {context}=await workflowContext();context.calls=[];
+ vm.runInContext(`state.dashboard=[{item_id:'filtered',status:'EXPIRED'}];state.analytics={marker:'dashboard'};$('#dashboardSearch').value='filtered';$('#dashboardMachineFilter').value='M';$('#prSource').value='expiring';renderPrSuggestions=()=>{};api=async path=>{calls.push(path);return {rows:[{item_id:'all-a',status:'EXPIRED'},{item_id:'all-b',status:'EXPIRING'}]};};`,context);
+ await vm.runInContext('refreshPrSuggestions()',context);
+ assert.deepEqual(context.calls,['/api/pr-suggestions']);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(suggestedPrRows().map(r=>r.item_id))',context)),['all-a','all-b']);
+ assert.equal(vm.runInContext('state.dashboard[0].item_id',context),'filtered');assert.equal(vm.runInContext('state.analytics.marker',context),'dashboard');
+ vm.runInContext("state.dashboard=[]",context);assert.equal(vm.runInContext('suggestedPrRows().length',context),2);
 });

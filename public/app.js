@@ -2,6 +2,7 @@ const state = {
   user: null,
   items: [],
   dashboard: [],
+  prSuggestionRows: [],
   dashboardCardFilter: "all",
   stock: [],
   reprintStock: [],
@@ -111,7 +112,7 @@ function bindUi() {
   $("#printReportBtn").addEventListener("click", printReport);
   $$("[data-report-type]").forEach((btn) => btn.addEventListener("click", () => setReportType(btn.dataset.reportType)));
   $$('[data-pr-source]').forEach(button=>button.addEventListener('click',()=>{ togglePrSource(button.dataset.prSource);renderPrSuggestions(); }));
-  $("#refreshPrSuggestionsBtn").addEventListener("click", refreshPrSuggestions);
+  $("#refreshPrSuggestionsBtn").addEventListener("click", () => refreshPrSuggestions(true));
   $("#addSelectedPrBtn").addEventListener("click", addSelectedPrSuggestions);
   $("#addAllVisiblePrBtn").addEventListener("click", addAllVisiblePrSuggestions);
   $("#openManualPrDialogBtn").addEventListener("click", openManualPrDialog);
@@ -191,7 +192,7 @@ function switchTab(tab) {
   if (state.stockViewsDirty.has(tab)) {
     const refreshers = {
       dashboard: refreshDashboard,
-      pr: refreshDashboard,
+      pr: refreshPrSuggestions,
       reprint: refreshReprintStock,
       reports: refreshReport,
       settings: async () => { await refreshSettings(); await refreshAuditMaybe(); },
@@ -212,7 +213,7 @@ function showLoginError(message) {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshStock(), refreshReprintStock()]);
+  await Promise.all([refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshPrSuggestions(), refreshStock(), refreshReprintStock()]);
   await Promise.all([refreshReport(), refreshPurchaseRequisitions()]);
   if (state.user.role === "admin") await Promise.all([refreshUsers(), refreshAudit()]);
   if (location.hash) switchTab(location.hash.slice(1));
@@ -282,7 +283,6 @@ async function refreshDashboard() {
   renderDashboardCardFilterState();
   renderDashboardColumns();
   renderDashboardTable();
-  renderPrSuggestions();
 }
 
 function setDashboardCardFilter(filter) {
@@ -365,6 +365,7 @@ function applyDashboardColumnVisibility() {
 }
 
 async function refreshItems() {
+  state.stockViewsDirty.add("pr");
   const q = encodeURIComponent($("#itemSearch").value.trim());
   const selectedMachine = $("#itemMachineFilter").value.trim();
   const machine = encodeURIComponent(selectedMachine);
@@ -457,6 +458,7 @@ async function openReceiveDialog(itemId) {
 }
 
 async function refreshStock() {
+  state.stockViewsDirty.add("pr");
   const q = encodeURIComponent($("#stockSearch").value.trim());
   const res = await api(`/api/stock/available?q=${q}`);
   state.stock = res.rows;
@@ -591,10 +593,11 @@ function printReport() {
   win.document.close();
 }
 
-async function refreshPrSuggestions() {
-  await refreshDashboard();
+async function refreshPrSuggestions(notify=false) {
+  const res=await api('/api/pr-suggestions');
+  state.prSuggestionRows=res.rows||[];
   renderPrSuggestions();
-  toast("รีเฟรชรายการแนะนำแล้ว");
+  if(notify)toast("รีเฟรชรายการแนะนำแล้ว");
 }
 
 function renderPrSuggestions() {
@@ -633,7 +636,7 @@ function togglePrSource(source){
 function suggestedPrRows() {
   const sources=prSources();
   const drafted=new Set(state.prRows.map(row=>row.item_id).filter(Boolean));
-  return state.dashboard.filter((row) => {
+  return state.prSuggestionRows.filter((row) => {
     if(drafted.has(row.item_id))return false;
     const expiring = ["EXPIRING", "EXPIRED"].includes(row.status);
     const reorder = ["REORDER", "CRITICAL"].includes(row.status);
@@ -1958,7 +1961,7 @@ async function saveExpiredDisposal(event){
 }
 
 function openPrSuggestionDetails(itemId){
- const row=state.dashboard.find(r=>r.item_id===itemId);if(!row)return;
+ const row=state.prSuggestionRows.find(r=>r.item_id===itemId);if(!row)return;
  const fields=[['สถานะ',row.status],['เครื่อง / ยี่ห้อ',row.machine],['Stock ปัจจุบัน',row.qty_main_display],['Lot',row.lot||'—'],['วันหมดอายุ',row.expiry?formatDateOnly(row.expiry):'—'],['จุดสั่งซื้อ ('+(row.sub_unit||'หน่วย')+')',row.reorder_point_sub],['Supplier',row.supplier||'ยังไม่ระบุ Supplier'],['หน่วยสั่งซื้อ',row.main_unit||row.sub_unit],['หน่วยตัดจริง',row.sub_unit],['อัตราแปลง',`${row.sub_per_main||1} ${row.sub_unit||''} / ${row.main_unit||''}`],['Lead Time',`${row.lead_time_days||0} วัน`],['เหตุผลแนะนำ',prReason(row)]];
  if(canViewPrices())fields.push(['ราคาต่อหน่วยหลัก',money(row.main_unit_price)],['ราคาต่อหน่วยย่อย',money(row.unit_price)]);
  $('#prSuggestionDetailsTitle').textContent=row.name;
