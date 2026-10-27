@@ -19,7 +19,8 @@ export default {
       if (!env.TENANT_ID) env = { ...env, ACCESS_EMAIL: await accessEmail(request, env) };
       const subscription = await subscriptionGate(request, env);
       if (subscription) env = { ...env, SUBSCRIPTION_INFO: subscription };
-      if (env.TENANT_ID && url.pathname.startsWith('/api/') && !['GET','HEAD','OPTIONS'].includes(request.method) && request.headers.get('origin') !== url.origin) {
+      // Every Worker (tenant or Access) rejects cross-site writes; the Access cookie's SameSite setting is not relied on.
+      if (url.pathname.startsWith('/api/') && !['GET','HEAD','OPTIONS'].includes(request.method) && request.headers.get('origin') !== url.origin) {
         throw httpError('Origin ไม่ถูกต้อง', 403);
       }
       if (url.pathname === '/api/tenant/setup') return await tenantSetup(request, env);

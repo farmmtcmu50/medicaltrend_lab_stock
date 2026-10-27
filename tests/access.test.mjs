@@ -100,6 +100,15 @@ test('stock: DEV_ACCESS_EMAIL bypass works only on localhost',async()=>{
  const asAdmin=await call('localhost','/api/me',{headers:{'x-dev-user-email':'somchai@medicaltrend.co.th'}});assert.equal(asAdmin.data.user.role,'admin');
  assert.equal((await stock('/api/me',{headers:{'x-dev-user-email':'somchai@medicaltrend.co.th'}})).status,401);
 });
+test('stock: cross-site writes are refused even with a valid Access JWT',async()=>{
+ const token=await jwt('somchai@medicaltrend.co.th');
+ for(const origin of ['https://evil.example','null']){
+  const r=await stock('/api/users',{method:'POST',token,headers:{origin},body:{username:'csrf',email:'csrf@medicaltrend.co.th',role:'admin'}});
+  assert.equal(r.status,403,String(origin));
+ }
+ assert.equal(await stockDb.prepare("SELECT user_id FROM users WHERE username='csrf'").first(),null);
+ assert.equal((await stock('/api/me',{token,headers:{origin:'https://evil.example'}})).status,200);
+});
 
 test('subscription: missing or invalid Access JWT is rejected with 401',async()=>{
  for(const path of ['/api/me','/api/tenants','/'])assert.equal((await control(path)).status,401,path);
