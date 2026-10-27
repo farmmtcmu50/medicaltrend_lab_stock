@@ -1,6 +1,5 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-const state={tenants:[],plans:[],detail:null,tab:'overview',renewals:false,setup:false,initialToken:new URLSearchParams(location.hash.slice(1)).get('token')||'',requestKey:crypto.randomUUID()};
-history.replaceState(null,'',location.pathname);
+const state={tenants:[],plans:[],detail:null,tab:'overview',renewals:false,requestKey:crypto.randomUUID()};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statusNames={active:'ใช้งานอยู่',trial:'ทดลองใช้',expired:'หมดอายุ',suspended:'ระงับบริการ'};
 const provisionNames={pending:'รอจัดเตรียม',provisioning:'กำลังจัดเตรียม',ready:'พร้อมใช้งาน',failed:'จัดเตรียมไม่สำเร็จ'};
@@ -12,10 +11,10 @@ function message(text,error=false){$('#message').textContent=text;$('#message').
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',...options,headers:{'content-type':'application/json',...options.headers},body:options.body===undefined?undefined:JSON.stringify(options.body)});
   let data;try{data=await response.json();}catch{throw new Error('ไม่สามารถอ่านคำตอบจากระบบได้');}
-  if(!response.ok){if(response.status===401&&path!=='/api/login')showAuth();throw new Error(data.error||'เกิดข้อผิดพลาด');}return data;
+  if(!response.ok){if([401,403].includes(response.status)&&path==='/api/me')showAuth(data.error);throw new Error(data.error||'เกิดข้อผิดพลาด');}return data;
 }
-function showAuth(){state.setup=false;$('#workspace').hidden=true;$('#logout').hidden=true;$('#auth').hidden=false;$('#adminEmail').textContent='';}
-function page(name){['customers','new','detail','plans','security'].forEach(p=>$('#'+p).hidden=p!==name);message('');}
+function showAuth(error){$('#workspace').hidden=true;$('#logout').hidden=true;$('#auth').hidden=false;$('#authError').textContent=error||'';$('#adminEmail').textContent='';}
+function page(name){['customers','new','detail','plans'].forEach(p=>$('#'+p).hidden=p!==name);message('');}
 async function load(){const [customers,plans]=await Promise.all([api('/api/tenants'),api('/api/plans')]);state.tenants=customers.rows;state.plans=plans.rows;renderCustomers();renderPlans();$('#customerForm').plan_id.innerHTML=planOptions();}
 function planOptions(selected){return state.plans.filter(p=>p.active).map(p=>`<option value="${esc(p.id)}" ${p.id===selected?'selected':''}>${esc(p.name)} · ${money(p.monthly_price_satang)}/เดือน</option>`).join('');}
 function renderCustomers(){
@@ -43,19 +42,15 @@ function toSatang(value){if(!/^\d+(\.\d{1,2})?$/.test(String(value)))throw new E
 function renderPlans(){$('#planList').innerHTML=state.plans.map(p=>`<form class="panel stack" data-plan="${esc(p.id)}"><h2>${esc(p.name)}</h2><label>ชื่อแพ็กเกจ<input name="name" value="${esc(p.name)}" required maxlength="80"></label><label>ราคาอ้างอิงต่อเดือน (บาท)<input name="price" value="${p.monthly_price_satang/100}" type="number" min="0" step="0.01" max="1000000" required></label><label>รายละเอียด<textarea name="description" maxlength="500" rows="3">${esc(p.description)}</textarea></label><button>บันทึกแพ็กเกจ</button></form>`).join('');$$('[data-plan]').forEach(f=>f.onsubmit=e=>perform(e,async form=>{const b=Object.fromEntries(new FormData(form));await api('/api/plans/'+form.dataset.plan,{method:'PUT',body:{name:b.name,monthly_price_satang:toSatang(b.price),description:b.description}});await load();message('บันทึกแพ็กเกจแล้ว');}));}
 async function perform(event,work){event.preventDefault();message('');const form=event.target,buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{await work(form);}catch(error){message(error.message,true);}finally{buttons.forEach(b=>b.disabled=false);}}
 async function start(){
- try{const status=await api('/api/status');state.setup=status.setup_required;$('#authForm').email.value=status.admin_email;$('#authForm').token.value=state.initialToken;state.initialToken='';
-  if(state.setup){$('#auth').hidden=false;$('#authTitle').textContent='ตั้งค่าผู้ดูแลครั้งแรก';$('#authDescription').textContent='ตั้งรหัสผ่านอย่างน้อย 12 ตัวอักษรสำหรับบัญชีส่วนกลาง';$('#tokenLabel').hidden=false;$('#confirmLabel').hidden=false;$('#authForm').token.required=true;$('#authForm').password.minLength=12;$('#authForm').password.autocomplete='new-password';$('#authForm').email.readOnly=true;$('#authSubmit').textContent='สร้างบัญชีผู้ดูแล';return;}
-  try{const me=await api('/api/me');await enter(me.user.email);}catch{showAuth();}
- }catch(error){message(error.message,true);}finally{$('#loading').hidden=true;}
+ try{const me=await api('/api/me');await enter(me.user.email);}
+ catch(error){if($('#auth').hidden)message(error.message,true);}finally{$('#loading').hidden=true;}
 }
 async function enter(email){await load();$('#auth').hidden=true;$('#workspace').hidden=false;$('#logout').hidden=false;$('#adminEmail').textContent=email;page('customers');}
-$('#authForm').onsubmit=async e=>{e.preventDefault();$('#authError').textContent='';const form=e.target,button=$('#authSubmit');button.disabled=true;try{if(state.setup){if(form.password.value!==form.confirm.value)throw new Error('รหัสผ่านยืนยันไม่ตรงกัน');await api('/api/setup',{method:'POST',body:{token:form.token.value,password:form.password.value}});form.token.value='';location.reload();}else{const data=await api('/api/login',{method:'POST',body:{email:form.email.value,password:form.password.value}});form.password.value='';await enter(data.email);}}catch(error){$('#authError').textContent=error.message;}finally{button.disabled=false;}};
-$('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST',body:{}});location.reload();}catch(e){message(e.message,true);}};
+$('#logout').onclick=()=>location.assign('/cdn-cgi/access/logout');
 $('#newCustomer').onclick=()=>page('new');$$('[data-back]').forEach(b=>b.onclick=()=>page('customers'));
 $('#customerForm').onsubmit=e=>perform(e,async form=>{const b=Object.fromEntries(new FormData(form));b.trial_days=Number(b.trial_days);const result=await api('/api/tenants',{method:'POST',body:b});form.reset();await load();await openCustomer(result.tenant.id);message('ลงทะเบียนลูกค้าแล้ว ขั้นต่อไป: จัดเตรียมพื้นที่ลูกค้าในแท็บฐานข้อมูล');});
 $('#customerList').onclick=e=>{const b=e.target.closest('[data-open]');if(b)openCustomer(b.dataset.open).catch(e=>message(e.message,true));};
 $('#search').oninput=renderCustomers;$('#statusFilter').onchange=renderCustomers;$('#refresh').onclick=()=>load().catch(e=>message(e.message,true));
 $$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;message('');renderDetail();});
-$$('[data-page]').forEach(b=>b.onclick=()=>{$$('[data-page]').forEach(n=>n.removeAttribute('aria-current'));b.setAttribute('aria-current','page');state.renewals=b.dataset.page==='renewals';page(['plans','security'].includes(b.dataset.page)?b.dataset.page:'customers');$('#directoryTitle').textContent=state.renewals?'ใกล้หมดอายุและรอต่ออายุ':'ลูกค้าทั้งหมด';renderCustomers();});
-$('#passwordForm').onsubmit=e=>perform(e,async form=>{if(form.password.value!==form.confirm.value)throw new Error('รหัสผ่านยืนยันไม่ตรงกัน');await api('/api/password',{method:'PUT',body:{current_password:form.current_password.value,password:form.password.value}});form.reset();location.reload();});
+$$('[data-page]').forEach(b=>b.onclick=()=>{$$('[data-page]').forEach(n=>n.removeAttribute('aria-current'));b.setAttribute('aria-current','page');state.renewals=b.dataset.page==='renewals';page(b.dataset.page==='plans'?b.dataset.page:'customers');$('#directoryTitle').textContent=state.renewals?'ใกล้หมดอายุและรอต่ออายุ':'ลูกค้าทั้งหมด';renderCustomers();});
 start();

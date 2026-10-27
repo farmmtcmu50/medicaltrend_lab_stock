@@ -1,15 +1,12 @@
-import {iso,id,randomToken,digest,equal,passwordHash,fail,validatePassword,effectiveStatus,addMonths,publicTenant} from './security.js';
+import {iso,id,digest,equal,fail,effectiveStatus,addMonths,publicTenant} from './security.js';
+import {accessEmail,ACCESS_LOGOUT} from './access.js';
 
-const COOKIE = 'mt_control_session';
 const SAFE = new Set(['GET','HEAD','OPTIONS']);
 const headers = {
   'cache-control':'no-store', 'x-content-type-options':'nosniff', 'referrer-policy':'no-referrer',
   'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 const json = (value, status=200, extra={}) => new Response(JSON.stringify(value), {status,headers:{...headers,'content-type':'application/json; charset=utf-8',...extra}});
-function cookie(request, token, maxAge=28800) {
-  return `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;
-}
 async function body(request) {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw fail('ต้องส่ง JSON',415);
   const text=await request.text(); if(text.length>16384) throw fail('ข้อมูลใหญ่เกินไป',413);
@@ -24,19 +21,16 @@ function text(value,label,max=160){const s=String(value||'').trim();if(!s||s.len
 function event(db,tenant,actor,action,details={}) {
   return db.prepare('INSERT INTO audit_events (id,tenant_id,actor,action,details,created_at) VALUES (?,?,?,?,?,?)').bind(id(),tenant,actor,action,JSON.stringify(details),iso());
 }
-async function throttle(db,key,limit) {
-  const now=Math.floor(Date.now()/1000);
-  const row=await db.prepare(`INSERT INTO auth_attempts(key,attempts,resets_at) VALUES (?,1,?)
-    ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN resets_at<=? THEN 1 ELSE attempts+1 END,
-    resets_at=CASE WHEN resets_at<=? THEN ? ELSE resets_at END RETURNING attempts`).bind(key,now+900,now,now,now+900).first();
-  if(row.attempts>limit)throw fail('ลองหลายครั้งเกินไป กรุณารอ 15 นาที',429);
-}
-async function admin(request,db){
-  const token=request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(COOKIE+'='))?.slice(COOKIE.length+1);
-  if(!token || !/^[a-f0-9]{64}$/.test(token))throw fail('กรุณาเข้าสู่ระบบผู้ดูแลส่วนกลาง',401);
-  const row=await db.prepare('SELECT a.id,a.email FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.expires_at>?').bind(await digest(token),iso()).first();
-  if(!row)throw fail('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่',401);
-  return row;
+// Identity comes from the Cloudflare Access JWT; the admins table still decides who may manage customers.
+// The first visit by ADMIN_EMAIL creates the owner row (no password is stored or accepted).
+async function admin(address,db,env){
+  const row=await db.prepare('SELECT id,email FROM admins WHERE email=?').bind(address).first();
+  if(row)return row;
+  if(address===String(env.ADMIN_EMAIL||'').trim().toLowerCase() && !(await db.prepare("SELECT id FROM admins WHERE id='owner'").first())){
+    await db.batch([db.prepare("INSERT OR IGNORE INTO admins(id,email,password_hash,salt,created_at) VALUES ('owner',?,'ACCESS_ONLY','',?)").bind(address,iso()),event(db,null,address,'OWNER_CREATED',{via:'cloudflare_access'})]);
+    return {id:'owner',email:address};
+  }
+  throw fail(`อีเมล ${address} ไม่มีสิทธิ์ผู้ดูแลส่วนกลาง`,403);
 }
 async function tenantById(db,tid){const row=await db.prepare('SELECT * FROM tenants WHERE id=?').bind(tid).first();if(!row)throw fail('ไม่พบลูกค้า',404);return row;}
 async function planById(db,pid){const row=await db.prepare('SELECT * FROM plans WHERE id=? AND active=1').bind(pid).first();if(!row)throw fail('ไม่พบแพ็กเกจที่เปิดใช้งาน');return row;}
@@ -52,46 +46,16 @@ export default {async fetch(request,env){
       if(!tenant.service_token_hash || !equal(await digest(token),tenant.service_token_hash))throw fail('Unauthorized',401);
       return json({ok:true,tenant_id:tenant.id,name:tenant.name,status:effectiveStatus(tenant),expires_at:tenant.expires_at,ready:tenant.provision_status==='ready'});
     }
+    // Everything except the Service Binding call above requires a verified Access identity.
+    const address=await accessEmail(request,env);
     if(!path.startsWith('/api/')){
       if(!['GET','HEAD'].includes(request.method))throw fail('Method not allowed',405);
       const response=await env.ASSETS.fetch(request);const h=new Headers(response.headers);for(const [k,v]of Object.entries(headers))h.set(k,v);
       return new Response(response.body,{status:response.status,headers:h});
     }
     if(!SAFE.has(request.method) && request.headers.get('origin')!==url.origin)throw fail('Origin ไม่ถูกต้อง',403);
-    if(path==='/api/status' && request.method==='GET')return json({ok:true,setup_required:!(await db.prepare("SELECT id FROM admins WHERE id='owner'").first()),admin_email:env.ADMIN_EMAIL});
-    if(path==='/api/setup' && request.method==='POST'){
-      await throttle(db,'setup:'+await digest(request.headers.get('cf-connecting-ip')||'local'),10);
-      const b=await body(request);
-      if(!env.SETUP_TOKEN||!equal(await digest(String(b.token||'')),await digest(env.SETUP_TOKEN)))throw fail('รหัสตั้งค่าครั้งแรกไม่ถูกต้อง',403);
-      validatePassword(b.password);const salt=randomToken();
-      try { await db.batch([db.prepare("INSERT INTO admins(id,email,password_hash,salt,created_at) VALUES ('owner',?,?,?,?)").bind(email(env.ADMIN_EMAIL),await passwordHash(b.password,salt),salt,iso()),event(db,null,env.ADMIN_EMAIL,'OWNER_CREATED')]); }
-      catch(e){if(String(e.message).includes('UNIQUE'))throw fail('ระบบตั้งค่าผู้ดูแลแล้ว',409);throw e;}
-      return json({ok:true});
-    }
-    if(path==='/api/login' && request.method==='POST'){
-      const b=await body(request),address=email(b.email);
-      await throttle(db,'ip:'+await digest(request.headers.get('cf-connecting-ip')||'local'),30);
-      await throttle(db,'email:'+await digest(address),10);
-      const user=await db.prepare('SELECT * FROM admins WHERE email=?').bind(address).first();
-      const hash=await passwordHash(String(b.password||'').slice(0,129),user?.salt||'invalid-user-salt');
-      if(!user || !equal(hash,user.password_hash))throw fail('อีเมลหรือรหัสผ่านไม่ถูกต้อง',401);
-      const token=randomToken();await db.batch([db.prepare('INSERT INTO sessions VALUES (?,?,?)').bind(await digest(token),user.id,new Date(Date.now()+28800000).toISOString()),db.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(iso()),db.prepare('DELETE FROM auth_attempts WHERE resets_at<?').bind(Math.floor(Date.now()/1000)-86400),event(db,null,address,'LOGIN')]);
-      return json({ok:true,email:address},200,{'set-cookie':cookie(request,token)});
-    }
-    const user=await admin(request,db);
-    if(path==='/api/me' && request.method==='GET')return json({ok:true,user});
-    if(path==='/api/logout' && request.method==='POST'){
-      const token=request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(COOKIE+'='))?.slice(COOKIE.length+1)||'';
-      await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(token)).run();return json({ok:true},200,{'set-cookie':cookie(request,'',0)});
-    }
-    if(path==='/api/password' && request.method==='PUT'){
-      const b=await body(request);validatePassword(b.password);
-      const current=await db.prepare('SELECT * FROM admins WHERE id=?').bind(user.id).first();
-      await throttle(db,'password:'+user.id,10);
-      if(!equal(await passwordHash(String(b.current_password||''),current.salt),current.password_hash))throw fail('รหัสผ่านเดิมไม่ถูกต้อง',403);
-      const salt=randomToken();await db.batch([db.prepare('UPDATE admins SET password_hash=?,salt=? WHERE id=?').bind(await passwordHash(b.password,salt),salt,user.id),db.prepare('DELETE FROM sessions WHERE admin_id=?').bind(user.id),event(db,null,user.email,'PASSWORD_CHANGED')]);
-      return json({ok:true},200,{'set-cookie':cookie(request,'',0)});
-    }
+    const user=await admin(address,db,env);
+    if(path==='/api/me' && request.method==='GET')return json({ok:true,user,logout_url:ACCESS_LOGOUT});
     if(path==='/api/plans' && request.method==='GET')return json({ok:true,rows:(await db.prepare('SELECT * FROM plans ORDER BY monthly_price_satang,id').all()).results});
     if(path.startsWith('/api/plans/') && request.method==='PUT'){
       const pid=path.split('/')[3],b=await body(request),name=text(b.name,'ชื่อแพ็กเกจ',80);

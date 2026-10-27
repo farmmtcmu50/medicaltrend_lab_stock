@@ -5,14 +5,16 @@ import {readFile,readdir,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {addMonths,digest} from '../subscription/src/security.js';
+import {SignJWT,exportJWK,generateKeyPair} from 'jose';
 const require=createRequire(import.meta.resolve('wrangler'));
 const {Miniflare,convertV4MiniflareOptions}=require('miniflare'),esbuild=require('esbuild');
-let mf,db,aDb,bDb,ownerCookie,tenantA,tenantB;
+let mf,db,aDb,bDb,ownerToken,tenantA,tenantB;
+const TEAM='https://medicaltrend.cloudflareaccess.com',AUD='control-aud-test';
 const origin='https://control.example';
 const password='a-secure-test-password-2026';
-const token='test-setup-token-not-used-in-production';
-async function request(path,{method='GET',body,cookie=ownerCookie,from=origin}={}){
- const response=await mf.dispatchFetch(origin+path,{method,headers:{...(cookie?{cookie}:{}),...(from?{origin:from}:{}),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+let strangerToken;
+async function request(path,{method='GET',body,token=ownerToken,cookie,from=origin}={}){
+ const response=await mf.dispatchFetch(origin+path,{method,headers:{...(token?{'cf-access-jwt-assertion':token}:{}),...(cookie?{cookie}:{}),...(from?{origin:from}:{}),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
  return {status:response.status,data:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]};
 }
 async function tenantRequest(name,path,{method='GET',body,cookie,from}={}){
@@ -23,10 +25,13 @@ async function tenantRequest(name,path,{method='GET',body,cookie,from}={}){
 async function sql(db,source){for(const statement of source.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();}
 before(async()=>{
  await mkdir(resolve('work'),{recursive:true});
+ const key=await generateKeyPair('RS256'),jwks={keys:[{...await exportJWK(key.publicKey),kid:'k1',alg:'RS256'}]};
+ const accessToken=email=>new SignJWT({email}).setProtectedHeader({alg:'RS256',kid:'k1'}).setIssuer(TEAM).setAudience(AUD).setIssuedAt().setExpirationTime('1h').sign(key.privateKey);
+ ownerToken=await accessToken('chanat@medicaltrend.co.th');strangerToken=await accessToken('admin@customer.example');
  const bundle=async file=>(await esbuild.build({entryPoints:[file],bundle:true,write:false,format:'esm',platform:'browser',mainFields:['browser','module','main'],conditions:['workerd','browser'],logLevel:'silent'})).outputFiles[0].text;
  const [control,stock]=await Promise.all([bundle('subscription/src/index.js'),bundle('src/index.js')]);
  const tenant=(name,tid,serviceToken)=>({name,routes:[name+'.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:stock}],compatibilityDate:'2026-08-31',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:name+'-db'},serviceBindings:{SUBSCRIPTIONS:'control'},bindings:{TENANT_ID:tid,SESSION_SECRET:'same-secret-for-explicit-tenant-boundary-test',SUBSCRIPTION_TOKEN:serviceToken,TENANT_SETUP_TOKEN:'setup-'+name,SESSION_COOKIE:'stock_session'}});
- mf=new Miniflare(convertV4MiniflareOptions({defaultPersistRoot:resolve('work/test-runtime-'+randomUUID()),workers:[{name:'control',routes:['control.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:control}],compatibilityDate:'2026-08-31',d1Databases:{CONTROL_DB:'control-db'},bindings:{ADMIN_EMAIL:'chanat@medicaltrend.co.th',SETUP_TOKEN:token}},tenant('tenant-a','tenant-a','service-a'),tenant('tenant-b','tenant-b','service-b')]}));
+ mf=new Miniflare(convertV4MiniflareOptions({defaultPersistRoot:resolve('work/test-runtime-'+randomUUID()),workers:[{name:'control',routes:['control.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:control}],compatibilityDate:'2026-08-31',d1Databases:{CONTROL_DB:'control-db'},bindings:{ADMIN_EMAIL:'chanat@medicaltrend.co.th',ACCESS_TEAM_DOMAIN:TEAM,ACCESS_AUD:AUD},outboundService:async r=>r.url===TEAM+'/cdn-cgi/access/certs'?Response.json(jwks):new Response('',{status:599})},tenant('tenant-a','tenant-a','service-a'),tenant('tenant-b','tenant-b','service-b')]}));
  db=await mf.getD1Database('CONTROL_DB','control');aDb=await mf.getD1Database('DB','tenant-a');bDb=await mf.getD1Database('DB','tenant-b');
  for(const file of (await readdir('subscription/migrations')).sort())await sql(db,await readFile('subscription/migrations/'+file,'utf8'));
  for(const file of (await readdir('migrations')).sort()){const content=await readFile('migrations/'+file,'utf8');await sql(aDb,content);await sql(bDb,content);}
@@ -37,16 +42,11 @@ test('calendar renewal clamps month end and preserves leap years',()=>{
  assert.equal(addMonths('2026-01-31T12:00:00.000Z',1),'2026-02-28T12:00:00.000Z');
  assert.equal(addMonths('2028-01-31T12:00:00.000Z',1),'2028-02-29T12:00:00.000Z');
 });
-test('control API requires owner setup token and rejects cross-origin writes',async()=>{
- assert.equal((await request('/api/tenants',{cookie:null})).status,401);
- assert.equal((await request('/api/setup',{method:'POST',cookie:null,from:'https://evil.example',body:{token,password}})).status,403);
- assert.equal((await request('/api/setup',{method:'POST',cookie:null,body:{token:'wrong',password}})).status,403);
- assert.equal((await request('/api/setup',{method:'POST',cookie:null,body:{token,password:'1111'}})).status,400);
- assert.equal((await request('/api/setup',{method:'POST',cookie:null,body:{token,password}})).status,200);
- assert.equal((await request('/api/setup',{method:'POST',cookie:null,body:{token,password}})).status,409);
- const login=await request('/api/login',{method:'POST',cookie:null,body:{email:'chanat@medicaltrend.co.th',password}});
- assert.equal(login.status,200);ownerCookie=login.cookie;assert.ok(ownerCookie);
- assert.equal((await request('/api/login',{method:'POST',cookie:null,body:{email:'admin@customer.example',password}})).status,401);
+test('control API requires an Access identity of the owner and rejects cross-origin writes',async()=>{
+ assert.equal((await request('/api/tenants',{token:null})).status,401);
+ assert.equal((await request('/api/tenants',{token:strangerToken})).status,403);
+ assert.equal((await request('/api/tenants',{method:'POST',from:'https://evil.example',body:{}})).status,403);
+ assert.equal((await request('/api/me')).status,200);
 });
 test('owner can create independent customers and cannot reuse their slug',async()=>{
  const input={name:'Customer A',slug:'customer-a',contact_email:'a@example.com',plan_id:'standard',trial_days:14};
@@ -67,7 +67,7 @@ test('customer passwords have no defaults and sessions are bound to their tenant
  const login=await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}});assert.equal(login.status,200);
  assert.equal((await tenantRequest('tenant-a','/api/me',{cookie:login.cookie})).status,200);
  assert.equal((await tenantRequest('tenant-b','/api/me',{cookie:login.cookie})).status,401);
- assert.equal((await request('/api/me',{cookie:login.cookie})).status,401);
+ assert.equal((await request('/api/me',{token:null,cookie:login.cookie})).status,401);
 });
 test('items, prices, units and backups stay in the selected customer database',async()=>{
  const insert=async(db,name,price,main,sub)=>db.prepare(`INSERT INTO items(item_id,reagent_name,unit_price,main_unit,sub_unit,created_at,updated_at) VALUES ('shared-id',?,?,?,?,?,?)`).bind(name,price,main,sub,new Date().toISOString(),new Date().toISOString()).run();
@@ -113,12 +113,9 @@ test('package prices persist and stale status writes leave no misleading audit e
  assert.equal((await request(`/api/tenants/${t.id}/status`,{method:'POST',body:{status:'suspended',reason:'stale test',version:t.version-1}})).status,409);
  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id=? AND action='STATUS_CHANGED'").bind(t.id).first()).n,before);
 });
-test('changing the owner password revokes all prior sessions and logout clears the new session',async()=>{
- const changed=await request('/api/password',{method:'PUT',body:{current_password:password,password:password+'-new'}});assert.equal(changed.status,200);
- assert.equal((await request('/api/me')).status,401);
- const login=await request('/api/login',{method:'POST',cookie:null,body:{email:'chanat@medicaltrend.co.th',password:password+'-new'}});assert.equal(login.status,200);ownerCookie=login.cookie;
- assert.equal((await request('/api/logout',{method:'POST',body:{}})).status,200);
- assert.equal((await request('/api/me')).status,401);
+test('control has no password or session endpoints; logout is handled by Access',async()=>{
+ for(const path of ['/api/password','/api/login','/api/logout','/api/setup'])assert.equal((await request(path,{method:path==='/api/password'?'PUT':'POST',body:{}})).status,404,path);
+ const me=await request('/api/me');assert.equal(me.data.logout_url,'/cdn-cgi/access/logout');assert.equal(me.cookie,undefined);
 });
 
 test('indexed QR scans preserve FEFO, mixed-case codes and partial packages', async () => {
