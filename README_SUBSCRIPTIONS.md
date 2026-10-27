@@ -1,6 +1,6 @@
 # ระบบ Subscription ของ Medical Trend Stock
 
-รุ่นแรก: Login ผู้ดูแลส่วนกลาง, ลูกค้าแยกราย, ทดลองใช้, แพ็กเกจ, รับโอนและบันทึกต่ออายุ,
+รุ่นแรก: ผู้ดูแลส่วนกลางเข้าผ่าน Cloudflare Access (One-time PIN), ลูกค้าแยกราย, ทดลองใช้, แพ็กเกจ, รับโอนและบันทึกต่ออายุ,
 ระงับ/เปิดบริการ และ audit trail ใช้งานจริงกับ Cloudflare Workers และ D1
 
 ## โครงสร้าง
@@ -24,13 +24,13 @@ npm run subscription:setup
 ```
 
 คำสั่ง setup สร้างฐานข้อมูลส่วนกลางใหม่, บันทึก database_id ใน
-`subscription/wrangler.jsonc`, รัน migrations, deploy ระบบส่วนกลาง และตั้ง SETUP_TOKEN
-URL หลักคือ https://subscriptions.medicaltrend.stream โดยใช้ Custom Domain ของ Worker
-workers.dev URL เดิมยังใช้ได้ และเว็บ stock.medicaltrend.stream แยกตามเดิม
+`subscription/wrangler.jsonc`, รัน migrations และ deploy ระบบส่วนกลาง
+URL เดียวคือ https://subscriptions.medicaltrend.stream (Custom Domain, ปิด workers.dev แล้ว)
+เว็บ stock.medicaltrend.stream แยกตามเดิม
 
-เปิดลิงก์จาก `.provisioning/control-setup.txt` แล้วตั้งรหัสผ่านอย่างน้อย 12 ตัวอักษร
-สำหรับ `chanat@medicaltrend.co.th` ลิงก์นี้มี token จึงไม่ควรใส่ใน Git หรือส่งในที่สาธารณะ
-ตั้งค่าผู้ดูแลได้ครั้งเดียว ไม่มีบัญชีหรือรหัสผ่านค่าเริ่มต้น
+ระบบส่วนกลางไม่มีรหัสผ่าน: ต้องมี Access application ของโดเมนนี้และตั้ง secret `ACCESS_AUD` ก่อน
+(ดู `docs/cloudflare-access.md`) แล้วเข้าด้วยรหัส One-time PIN ของ `ADMIN_EMAIL`
+(`chanat@medicaltrend.co.th`) การเข้าครั้งแรกจะสร้างบัญชี owner ให้อัตโนมัติ
 
 การรัน setup ซ้ำกับฐานที่ระบุ ID แล้วจะอัปเดตตารางและ Worker โดยรักษาข้อมูลเดิม
 ถ้าพบฐานชื่อเดียวกันแต่ config ยังไม่มี ID คำสั่งจะหยุดให้ผู้ดูแลตรวจฐานก่อน
@@ -43,8 +43,8 @@ npm run subscription:setup -- --local
 npm run subscription:dev
 ```
 
-เปิด `http://127.0.0.1:8790` โดยใช้ลิงก์ตั้งรหัสผ่านใน
-`.provisioning/control-local-setup.txt` ฐาน local และ remote แยกจากกัน
+เปิด `http://127.0.0.1:8790` บนเครื่องข้าม Access ด้วย `DEV_ACCESS_EMAIL` ใน `subscription/.dev.vars`
+(setup --local สร้างไฟล์นี้จาก `.dev.vars.example` ถ้ายังไม่มี และไม่เขียนทับไฟล์ที่มีอยู่) ฐาน local และ remote แยกจากกัน
 หาก remote setup เปลี่ยน database_id ระหว่าง dev ให้รัน setup --local และเปิด dev ใหม่
 เพื่อสร้างตาราง local ให้ตรง binding
 
@@ -107,17 +107,14 @@ update อ่าน ID จากทะเบียน, สร้าง config, �
 
 ## Secrets และการกู้บัญชี
 
-- `.provisioning/` เก็บ secrets, config และลิงก์ตั้งรหัสผ่าน ไม่เข้า Git
+- `.provisioning/` เก็บ secrets, config และลิงก์ตั้งรหัสผ่านของลูกค้า ไม่เข้า Git
 - อย่าส่งไฟล์ secrets หรือ SQL backup ในแชตสาธารณะ
-- ส่วนกลางใช้ session แบบ token สุ่ม เก็บเฉพาะ hash ใน D1, HttpOnly, Secure บน HTTPS,
-  SameSite=Strict และตรวจ Origin ของคำขอแก้ไขข้อมูล
-- เปลี่ยนรหัสผ่านส่วนกลางจะยกเลิก sessions ทุกอุปกรณ์
+- ส่วนกลางยืนยันตัวตนด้วย Cloudflare Access: Worker ตรวจ JWT ทุก request และตรวจ Origin ของคำขอแก้ไขข้อมูล
+  ตัด session ได้ที่ Zero Trust → Users → Revoke sessions
 - Worker ลูกค้าใช้ secret และ cookie แยกราย พร้อม tenant_id ใน session
-- จำกัดการลอง login/setup ทั้งส่วนกลางและลูกค้า
-- รุ่นนี้ยังไม่มี forgot-password ทางอีเมล, MFA หรือผู้ดูแลส่วนกลางหลายคน
-  หากลืมรหัสผ่าน ให้ผู้มีสิทธิ์ Cloudflare ใช้กระบวนการกู้บัญชีที่ตรวจเจ้าของแล้ว
-  สำรอง CONTROL_DB ก่อน แก้ hash/salt ของ owner และล้าง sessions ผ่านการดูแลโดยตรง
-  ห้ามลบ admins เพื่อเปิด setup ใหม่โดยไม่ตรวจสอบ audit/ผลกระทบ
+- จำกัดการลอง login/setup ของ Worker ลูกค้า
+- ผู้ดูแลส่วนกลางมีคนเดียว (owner) การเปลี่ยนอีเมล owner ต้องแก้ `admins.email` และ policy ของ Access
+  โดยผู้มีสิทธิ์ Cloudflare หลังสำรอง CONTROL_DB และบันทึก audit
 
 ## Validation
 
@@ -128,8 +125,8 @@ npm run check
 ```
 
 Tests ใช้ workerd/Miniflare จริงพร้อมฐาน D1 ของ control และลูกค้า A/B แยกกัน
-ทดสอบ owner setup, CSRF, tenant isolation, สินค้า/ราคา/หน่วย/backup, expiry,
-suspension, payment idempotency/concurrency, calendar month และ session revocation
+ทดสอบ Access JWT ของส่วนกลาง, CSRF, tenant isolation, สินค้า/ราคา/หน่วย/backup, expiry,
+suspension, payment idempotency/concurrency และ calendar month (`npm run test:access` ทดสอบ 401/403/role ของ Access)
 
 ยังไม่รวม payment gateway, ออกใบกำกับภาษี, quota ตามแพ็กเกจ, self-service signup,
 custom domain อัตโนมัติ หรือ automatic provisioning จากหน้าจอ

@@ -51,24 +51,26 @@ async function init(){
  }
  console.log('กำลังสร้าง/อัปเดตตารางส่วนกลาง ('+(local?'local':'remote')+')');
  await wrangler(['d1','migrations','apply','medical-trend-subscriptions','--config',configPath,local?'--local':'--remote']);
- const existing=await query("SELECT id FROM admins WHERE id='owner'");
- const setupPath=join(privateDir,local?'control-local-secrets.json':'control-secrets.json');
- let secrets;try{secrets=JSON.parse(await readFile(setupPath,'utf8'));}catch{secrets={SETUP_TOKEN:token()};await privateWrite(setupPath,JSON.stringify(secrets));}
- if(local){await privateWrite(join(root,'subscription/.dev.vars'),`SETUP_TOKEN=${secrets.SETUP_TOKEN}\n`);}
+ // Sign-in is Cloudflare Access (One-time PIN); there is no setup token or password link any more.
+ const owner=(await query("SELECT email FROM admins WHERE id='owner'"))[0];
  let url='http://127.0.0.1:8790';
- if(!local){
-  const out=await wrangler(['deploy','--config',configPath]);
-  url=out.match(/https:\/\/[a-z0-9.-]+\.workers\.dev/)?.[0];
-  if(!url)throw new Error('Deploy สำเร็จแต่ไม่พบ workers.dev URL โปรดตรวจ Cloudflare');
-  await wrangler(['secret','bulk','--config',configPath],JSON.stringify(secrets));
+ if(local){
+  // Never overwrite subscription/.dev.vars: it holds ACCESS_AUD / DEV_ACCESS_EMAIL.
+  const devVars=join(root,'subscription/.dev.vars');
+  let vars;
+  try{vars=await readFile(devVars,'utf8');}
+  catch{vars=(await readFile(join(root,'subscription/.dev.vars.example'),'utf8')).replace(/^DEV_ACCESS_EMAIL=$/m,'DEV_ACCESS_EMAIL='+config.vars.ADMIN_EMAIL);await privateWrite(devVars,vars);console.log('สร้าง subscription/.dev.vars จากตัวอย่างแล้ว');}
+  if(!/^DEV_ACCESS_EMAIL=\S/m.test(vars))console.warn('คำเตือน: subscription/.dev.vars ยังไม่มี DEV_ACCESS_EMAIL จะเข้าระบบบนเครื่องไม่ได้');
+ }else{
   const customDomain=config.routes?.find(route=>route.custom_domain)?.pattern;
-  if(customDomain)url='https://'+customDomain;
+  if(!customDomain)throw new Error('ไม่พบ custom domain ใน subscription/wrangler.jsonc');
+  let secrets=[];try{secrets=parseJSON(await wrangler(['secret','list','--config',configPath]));}catch{}
+  if(!secrets.some(secret=>secret.name==='ACCESS_AUD'))console.warn('คำเตือน: ยังไม่ได้ตั้ง ACCESS_AUD ระบบจะตอบ 500 จนกว่าจะสร้าง Access application และตั้ง secret (ดู docs/cloudflare-access.md)');
+  await wrangler(['deploy','--config',configPath]);
+  url='https://'+customDomain;
  }
- const setupLink=existing.length?url:`${url}/#token=${secrets.SETUP_TOKEN}`;
- await privateWrite(join(privateDir,local?'control-local-setup.txt':'control-setup.txt'),setupLink+'\n');
  console.log('ระบบส่วนกลาง: '+url);
- console.log('บัญชีผู้ดูแล: '+config.vars.ADMIN_EMAIL);
- console.log('ลิงก์ตั้งรหัสผ่านเก็บที่ '+join(privateDir,local?'control-local-setup.txt':'control-setup.txt'));
+ console.log('เข้าสู่ระบบผ่าน Cloudflare Access (One-time PIN) ด้วยอีเมล '+(owner?.email||config.vars.ADMIN_EMAIL)+(owner?'':' (บัญชี owner จะถูกสร้างเมื่อเข้าครั้งแรก)'));
  if(local)console.log('เปิดด้วย npm run subscription:dev');
 }
 async function provision(slug){
