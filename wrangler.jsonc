@@ -4,6 +4,8 @@
   "main": "src/index.js",
   "compatibility_date": "2026-08-31",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
@@ -25,6 +27,6 @@
   ],
   "vars": {
     "APP_NAME": "Medical Trend Lab Stock",
-    "SESSION_COOKIE": "mt_stock_session"
+    "ACCESS_TEAM_DOMAIN": "https://medicaltrend.cloudflareaccess.com"
   }
 }

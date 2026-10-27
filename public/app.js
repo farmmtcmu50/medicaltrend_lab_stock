@@ -43,9 +43,11 @@ async function boot() {
   try {
     const me = await api("/api/me");
     state.user = me.user;
+    state.auth = me.auth;
     showApp();
     await refreshAll();
-  } catch {
+  } catch (error) {
+    if (error.auth === "access") showAccessError(error.message);
     $("#loginView").classList.remove("hidden");
   }
 }
@@ -68,6 +70,7 @@ function bindUi() {
   $("#loginForm").username.addEventListener("input", () => showLoginError(""));
   $("#loginForm").password.addEventListener("input", () => showLoginError(""));
   $("#logoutBtn").addEventListener("click", async () => {
+    if (state.auth === "access") return location.assign("/cdn-cgi/access/logout");
     await api("/api/logout", { method: "POST" });
     location.reload();
   });
@@ -175,6 +178,7 @@ function showApp() {
   $("#userLabel").textContent = `${state.user.username} (${state.user.role})`;
   if ($("#prMetaForm") && !$("#prMetaForm").requester.value) $("#prMetaForm").requester.value = state.user.username;
   $$(".admin-only").forEach((el) => el.classList.toggle("hidden", state.user.role !== "admin"));
+  $$(".password-only").forEach((el) => el.classList.toggle("hidden", state.auth === "access"));
   $$(".price-only").forEach((el) => el.classList.toggle("hidden", !canViewPrices()));
 }
 
@@ -203,6 +207,13 @@ function switchTab(tab) {
     }
   }
   if (tab === "consume") setTimeout(() => $("#consumeForm").barcode.focus(), 0);
+}
+
+// Medical Trend's own deployment signs in through Cloudflare Access; there is no password form.
+function showAccessError(message) {
+  $$("#loginForm label, #loginForm button").forEach((el) => el.classList.add("hidden"));
+  $("#accessLogout").classList.remove("hidden");
+  showLoginError(message || "ไม่สามารถยืนยันตัวตนผ่าน Cloudflare Access ได้");
 }
 
 function showLoginError(message) {
@@ -1431,7 +1442,7 @@ async function restoreBackup(e) {
 async function refreshUsers() {
   const res = await api("/api/users");
   state.users = res.rows;
-  renderTable($("#usersTable"), [["username", "Username"], ["role", "Role"], ["created_at", "Created"], ["actions", "จัดการ"]],
+  renderTable($("#usersTable"), [["username", "Username"], ["email", "Email"], ["role", "Role"], ["created_at", "Created"], ["actions", "จัดการ"]],
     res.rows.map((u) => ({ ...u, actions: u.user_id })), {
       actions: (_, user) => `<div class="row-actions"><button data-edit-user="${user.user_id}">แก้ไข</button><button class="danger" data-delete-user="${user.user_id}" ${user.username === "admin" ? "disabled" : ""}>ลบ</button></div>`,
     });
@@ -1444,6 +1455,7 @@ function editUser(id) {
   const form = $("#userForm");
   form.user_id.value = user.user_id;
   form.username.value = user.username;
+  form.email.value = user.email || "";
   form.role.value = user.role;
   form.password.value = "";
 }
@@ -1525,7 +1537,7 @@ function compare(a, b, asc) {
 async function api(path, opts = {}) {
   const res = await fetch(path, jsonOpts(opts));
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.ok === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), {status:res.status});
+  if (!res.ok || data.ok === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), {status:res.status,auth:data.auth});
   return data;
 }
 

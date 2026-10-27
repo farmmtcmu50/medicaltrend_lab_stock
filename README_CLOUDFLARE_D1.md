@@ -53,12 +53,11 @@ npm run deploy
 
 เมื่อ deploy สำเร็จ ให้เปิด `https://stock.medicaltrend.stream`
 
-## Login เริ่มต้น
+## การเข้าสู่ระบบ
 
-- Username: `admin`
-- Password: `1111`
-
-ระบบจะสร้าง admin เริ่มต้นให้อัตโนมัติเมื่อเปิดใช้งานครั้งแรก หลังจากนั้นควรเปลี่ยน password admin ทันทีในแท็บตั้งค่า
+`stock.medicaltrend.stream` เข้าผ่าน Cloudflare Access (One-time PIN ทางอีเมล) ไม่มี username/password แล้ว
+ผู้ใช้ต้องมีอีเมลในตาราง `users` — ดูขั้นตอนตั้งค่าและลำดับการเปลี่ยนใน `docs/cloudflare-access.md`
+(Worker ลูกค้า `mt-stock-<slug>` ยังใช้ username/password ตาม README_SUBSCRIPTIONS.md)
 
 ## ย้ายข้อมูลจากโปรแกรม Portable เดิม
 

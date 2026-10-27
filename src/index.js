@@ -3,6 +3,7 @@ import { analytics, period } from "./analytics.js";
 import QRCode from "qrcode";
 import { stockWorkflow } from "./workflows.js";
 import { subscriptionGate, tenantSetup } from "./subscription.js";
+import { accessEmail } from "../subscription/src/access.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const COOKIE_MAX_AGE = 60 * 60 * 12;
@@ -13,6 +14,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      // Medical Trend's own Worker (no TENANT_ID) authenticates only via Cloudflare Access.
+      // Customer tenant Workers keep their own username/password login.
+      if (!env.TENANT_ID) env = { ...env, ACCESS_EMAIL: await accessEmail(request, env) };
       const subscription = await subscriptionGate(request, env);
       if (subscription) env = { ...env, SUBSCRIPTION_INFO: subscription };
       if (env.TENANT_ID && url.pathname.startsWith('/api/') && !['GET','HEAD','OPTIONS'].includes(request.method) && request.headers.get('origin') !== url.origin) {
@@ -31,7 +35,7 @@ export default {
       return env.ASSETS.fetch(request);
     } catch (error) {
       console.error(error);
-      return json({ ok: false, error: error.message || "Server error" }, error.status || 500);
+      return json({ ok: false, error: error.message || "Server error", ...(env.TENANT_ID ? {} : { auth: "access" }) }, error.status || 500);
     }
   },
 };
@@ -41,8 +45,8 @@ async function api(request, env) {
   const path = url.pathname.replace(/^\/api/, "") || "/";
   const method = request.method.toUpperCase();
 
-  if (method === "POST" && path === "/login") return login(request, env);
-  if (method === "POST" && path === "/logout") return logout(env, request);
+  if (env.TENANT_ID && method === "POST" && path === "/login") return login(request, env);
+  if (env.TENANT_ID && method === "POST" && path === "/logout") return logout(env, request);
 
   const user = await requireUser(request, env);
   const flow = workflows(env,user);
@@ -59,8 +63,8 @@ async function api(request, env) {
   if (method === "GET" && path === "/stock-counts/lots") return json(await flow.lots(url.searchParams.get('item_id')||''));
   if (method === "POST" && path === "/stock-counts") return json(await flow.createCount(await readBody(request)));
   if (method === "POST" && /^\/stock-counts\/[^/]+\/approve$/.test(path)) return json(await flow.approveCount(await readBody(request),path.split('/')[2]));
-  if (method === "GET" && path === "/me") return json({ ok: true, user: publicUser(user) });
-  if (method === "PUT" && path === "/me/password") return changeOwnPassword(request, env, user);
+  if (method === "GET" && path === "/me") return json({ ok: true, user: publicUser(user), auth: env.ACCESS_EMAIL ? "access" : "password" });
+  if (env.TENANT_ID && method === "PUT" && path === "/me/password") return changeOwnPassword(request, env, user);
   if(method==='PUT'&&path==='/dashboard/purchase-total'){
     if(user.role!=='admin')throw httpError('ต้องใช้สิทธิ์ผู้ดูแล',403);
     const body=await readBody(request),range=period(new URLSearchParams({period:'custom',start:body.start,end:body.end}));
@@ -132,6 +136,7 @@ async function ensureBootstrap(env) {
     await env.DB.prepare("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES ('expiring_days', '90', ?)").bind(now()).run();
   }
   if (env.TENANT_ID) return; // New customers set their own password using a one-time setup link.
+  if (env.ACCESS_EMAIL) return; // Access users are matched by email; no default password account.
   const userCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE is_active = 1").first();
   const admin = await env.DB.prepare("SELECT * FROM users WHERE lower(username) = 'admin'").first();
   if (!userCount?.n || !admin || admin.password_hash === "AUTO_CREATE_ON_FIRST_LOGIN") {
@@ -714,7 +719,7 @@ async function changeOwnPassword(request, env, user) {
 }
 
 async function listUsers(env) {
-  const rows = await env.DB.prepare("SELECT user_id, username, role, is_active, created_at, updated_at FROM users WHERE is_active = 1 ORDER BY lower(username)").all();
+  const rows = await env.DB.prepare("SELECT user_id, username, email, role, is_active, created_at, updated_at FROM users WHERE is_active = 1 ORDER BY lower(username)").all();
   return json({ ok: true, rows: rows.results || [] });
 }
 
@@ -722,24 +727,27 @@ async function addUser(request, env, admin) {
   const body = await readBody(request);
   const username = String(body.username || "").trim();
   const password = String(body.password || "").trim();
+  const email = cleanEmail(body.email, Boolean(env.ACCESS_EMAIL));
   const role = body.role === "admin" ? "admin" : "staff";
-  if (!username || !password) throw httpError("กรุณากรอก username และ password");
+  if (!username || (!password && !env.ACCESS_EMAIL)) throw httpError("กรุณากรอก username และ password");
   const existing = await env.DB.prepare("SELECT * FROM users WHERE lower(username) = lower(?)").bind(username).first();
   if (existing?.is_active) throw httpError("username นี้มีอยู่แล้ว");
-  const hp = await hashPassword(password);
+  await assertEmailFree(env, email, existing?.user_id || "");
+  // Access users never sign in with a password; store a value no password hash can match.
+  const hp = env.ACCESS_EMAIL ? { hash: "ACCESS_ONLY", salt: "" } : await hashPassword(password);
   if (existing) {
     await env.DB.prepare(
       `UPDATE users
-       SET username = ?, password_hash = ?, salt = ?, role = ?, is_active = 1, updated_at = ?
+       SET username = ?, email = ?, password_hash = ?, salt = ?, role = ?, is_active = 1, updated_at = ?
        WHERE user_id = ?`
-    ).bind(username, hp.hash, hp.salt, role, now(), existing.user_id).run();
+    ).bind(username, email, hp.hash, hp.salt, role, now(), existing.user_id).run();
   } else {
     await env.DB.prepare(
-      `INSERT INTO users (user_id, username, password_hash, salt, role, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
-    ).bind(nextId("USR"), username, hp.hash, hp.salt, role, now(), now()).run();
+      `INSERT INTO users (user_id, username, email, password_hash, salt, role, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(nextId("USR"), username, email, hp.hash, hp.salt, role, now(), now()).run();
   }
-  await logAudit(env, admin.username, "ADD_USER", "user", username, "SUCCESS", { role });
+  await logAudit(env, admin.username, "ADD_USER", "user", username, "SUCCESS", { role, email });
   return json({ ok: true });
 }
 
@@ -748,24 +756,42 @@ async function updateUser(request, env, admin, userId) {
   const target = await env.DB.prepare("SELECT * FROM users WHERE user_id = ? AND is_active = 1").bind(userId).first();
   if (!target) throw httpError("ไม่พบผู้ใช้งาน", 404);
   const username = String(body.username || "").trim();
+  const email = cleanEmail(body.email, Boolean(env.ACCESS_EMAIL));
   const role = body.role === "admin" ? "admin" : "staff";
   if (!username) throw httpError("กรุณากรอก username");
+  await assertEmailFree(env, email, userId);
   const duplicate = await env.DB.prepare("SELECT user_id FROM users WHERE lower(username) = lower(?) AND user_id <> ? AND is_active = 1").bind(username, userId).first();
   if (duplicate) throw httpError("username นี้มีอยู่แล้ว");
   if (target.role === "admin" && role !== "admin") {
     const admins = await count(env, "users", "role = 'admin' AND is_active = 1");
     if (admins <= 1) throw httpError("ไม่สามารถเปลี่ยน admin คนสุดท้ายเป็น staff");
   }
-  const password = String(body.password || "").trim();
+  const password = env.ACCESS_EMAIL ? "" : String(body.password || "").trim();
   if (password) {
     const hp = await hashPassword(password);
-    await env.DB.prepare("UPDATE users SET username = ?, role = ?, password_hash = ?, salt = ?, updated_at = ? WHERE user_id = ?")
-      .bind(username, role, hp.hash, hp.salt, now(), userId).run();
+    await env.DB.prepare("UPDATE users SET username = ?, email = ?, role = ?, password_hash = ?, salt = ?, updated_at = ? WHERE user_id = ?")
+      .bind(username, email, role, hp.hash, hp.salt, now(), userId).run();
   } else {
-    await env.DB.prepare("UPDATE users SET username = ?, role = ?, updated_at = ? WHERE user_id = ?").bind(username, role, now(), userId).run();
+    await env.DB.prepare("UPDATE users SET username = ?, email = ?, role = ?, updated_at = ? WHERE user_id = ?").bind(username, email, role, now(), userId).run();
   }
-  await logAudit(env, admin.username, "UPDATE_USER", "user", username, "SUCCESS", { role, password_changed: Boolean(password) });
+  await logAudit(env, admin.username, "UPDATE_USER", "user", username, "SUCCESS", { role, email, before_email: target.email || null, password_changed: Boolean(password) });
   return json({ ok: true });
+}
+
+function cleanEmail(value, required) {
+  const email = String(value || "").trim().toLowerCase();
+  if (!email) {
+    if (required) throw httpError("กรุณากรอกอีเมลที่ใช้รับรหัส One-time PIN");
+    return null;
+  }
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError("อีเมลไม่ถูกต้อง");
+  return email;
+}
+
+async function assertEmailFree(env, email, userId) {
+  if (!email) return;
+  const duplicate = await env.DB.prepare("SELECT user_id FROM users WHERE lower(email) = ? AND user_id <> ? AND is_active = 1").bind(email, userId).first();
+  if (duplicate) throw httpError("อีเมลนี้ถูกใช้กับผู้ใช้งานอื่นแล้ว");
 }
 
 async function deleteUser(env, admin, userId) {
@@ -840,6 +866,10 @@ async function backup(env, user) {
 async function restore(request, env, admin) {
   const body = await readBody(request);
   if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
+  // Restore replaces the users table; refuse a backup that would lock the restoring admin out of Access.
+  if (env.ACCESS_EMAIL && !(body.tables.users || []).some((u) => Number(u.is_active) === 1 && u.role === "admin" && String(u.email || "").trim().toLowerCase() === env.ACCESS_EMAIL)) {
+    throw httpError(`ไฟล์ backup ไม่มี admin ที่ใช้อีเมล ${env.ACCESS_EMAIL} การ restore จะทำให้เข้าระบบไม่ได้`, 400);
+  }
   const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
   for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers"]) safety.tables[table]=await tableRows(env,table);
   await replaceTables(env, body.tables);
@@ -898,6 +928,11 @@ async function replaceTables(env, tables) {
 }
 
 async function requireUser(request, env) {
+  if (env.ACCESS_EMAIL) {
+    const user = await env.DB.prepare("SELECT * FROM users WHERE lower(email) = ? AND is_active = 1").bind(env.ACCESS_EMAIL).first();
+    if (!user) throw httpError(`อีเมล ${env.ACCESS_EMAIL} ยังไม่ได้ลงทะเบียนเป็นผู้ใช้งาน กรุณาติดต่อผู้ดูแล`, 403);
+    return user;
+  }
   const token = readCookie(request, env.SESSION_COOKIE || "mt_stock_session");
   const session = token ? await verifySession(env, token) : null;
   if (!session?.user_id || session.exp < unixNow()) throw httpError("กรุณา login ก่อน", 401);
@@ -1097,7 +1132,7 @@ function money(value) {
 function round(value) { return Math.round(Number(value || 0) * 100) / 100; }
 function dateOnly(d) { return d.toISOString().slice(0, 10); }
 function daysBetween(a, b) { return Math.floor((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000); }
-function publicUser(user) { return { user_id: user.user_id, username: user.username, role: user.role }; }
+function publicUser(user) { return { user_id: user.user_id, username: user.username, email: user.email || null, role: user.role }; }
 function xml(text) { return String(text).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c])); }
 function escapeHtml(text) { return xml(text); }
 

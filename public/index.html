@@ -23,6 +23,7 @@
         <button class="primary">Login</button>
         <p id="loginError" class="login-error hidden" role="alert"></p>
       </form>
+      <a id="accessLogout" class="primary hidden" href="/cdn-cgi/access/logout">ออกจากระบบและเข้าด้วยอีเมลอื่น</a>
     </section>
   </main>
 
@@ -345,7 +346,7 @@
               <button class="danger">ลบข้อมูลใน Database ทั้งหมด</button>
             </form>
           </section>
-          <section class="panel stack">
+          <section class="panel stack password-only">
             <h3>เปลี่ยนรหัสผ่านของฉัน</h3>
             <form id="changePasswordForm" class="grid-form">
               <label>รหัสผ่านเดิม<input name="current_password" type="password" autocomplete="current-password" required></label>
@@ -365,7 +366,8 @@
             <form id="userForm" class="grid-form">
               <input name="user_id" type="hidden">
               <label>Username<input name="username"></label>
-              <label>Password<input name="password" type="password" placeholder="เว้นว่างเมื่อไม่เปลี่ยน"></label>
+              <label>Email<input name="email" type="email" placeholder="อีเมลที่ใช้รับ One-time PIN"></label>
+              <label class="password-only">Password<input name="password" type="password" placeholder="เว้นว่างเมื่อไม่เปลี่ยน"></label>
               <label>Role<select name="role"><option value="staff">staff</option><option value="admin">admin</option></select></label>
               <button class="primary">บันทึกผู้ใช้งาน</button>
             </form>
