@@ -1,0 +1,6 @@
+# Copy the lines you need into .dev.vars (never commit .dev.vars).
+# ACCESS_AUD is the Access application's AUD tag; in production set it with `npx wrangler secret put ACCESS_AUD`.
+ACCESS_AUD=
+# Local-only bypass: on localhost/127.0.0.1 the Worker trusts this email (or an x-dev-user-email header)
+# instead of a Cf-Access-Jwt-Assertion. It must match users.email of an active user in the local D1.
+DEV_ACCESS_EMAIL=

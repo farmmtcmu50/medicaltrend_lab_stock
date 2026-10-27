@@ -1,0 +1,4 @@
+# Copy into subscription/.dev.vars (never commit it).
+ACCESS_AUD=
+# Local-only bypass on localhost/127.0.0.1; must equal admins.email (or ADMIN_EMAIL on first run).
+DEV_ACCESS_EMAIL=

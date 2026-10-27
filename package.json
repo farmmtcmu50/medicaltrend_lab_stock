@@ -18,9 +18,12 @@
     "subscription:provision": "node scripts/subscription.mjs provision",
     "subscription:update": "node scripts/subscription.mjs update",
     "subscription:backup": "node scripts/subscription.mjs backup",
-    "test:subscription": "node --test tests/subscription.test.mjs"
+    "test:subscription": "node --test tests/subscription.test.mjs",
+    "test:access": "node --test tests/access.test.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "jose": "^6.2.13",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
