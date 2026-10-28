@@ -158,3 +158,10 @@ test('item menu filtering retains the full master used by receiving PR and count
  assert.equal(vm.runInContext('state.dashboard[0].item_id',context),'dashboard');assert.equal(vm.runInContext('state.prSuggestionRows[0].item_id',context),'suggestion');
  vm.runInContext("$('#itemSearch').value='no match'",context);await vm.runInContext('refreshItems()',context);assert.equal(vm.runInContext('state.itemMenuResult.length',context),0);assert.equal(vm.runInContext('state.items.length',context),2);
 });
+
+
+test('item cost column is restricted to admin',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext("state.user.role='admin'",context);assert.equal(vm.runInContext("itemVisibleColumns().find(([key])=>key==='main_unit_price')[1]",context),'ราคาต้นทุน');
+ vm.runInContext("state.user.role='staff'",context);assert.equal(vm.runInContext("itemVisibleColumns().some(([key])=>priceColumnKeys.has(key))",context),false);
+});

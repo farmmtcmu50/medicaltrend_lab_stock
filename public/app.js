@@ -400,7 +400,7 @@ async function refreshItems() {
   })), {
     active_label: (v) => `<span class="badge ${esc(v.toUpperCase())}">${esc(v)}</span>`,
     unit_price: money,
-    main_unit_price: money,
+    main_unit_price: (value,row) => `${money(value)} บาท / ${esc(row.main_unit||row.sub_unit||'หน่วย')}`,
     actions: (_, item) => {
       const active = Number(item.is_active ?? 1) === 1;
       return `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button data-item-lots="${esc(item.item_id)}">จัดการ Lot</button><button data-toggle-item="${item.item_id}" class="${active ? "warning" : "primary"}">${active ? "Inactive" : "Active"}</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`;
@@ -420,8 +420,8 @@ function itemVisibleColumns() {
   return [
     ["active_label", "สถานะ"], ["reagent_name", "ชื่อ"], ["machine", "เครื่อง"], ["main_unit", "หน่วยหลัก"], ["sub_unit", "หน่วยย่อย"],
     ["sub_per_main", "ย่อย/หลัก"], ["supplier", "Supplier"], ["lead_time_days", "Lead"],
-    ["reorder_point_sub", "Safety Stock"], ["actions", "จัดการ"],
-  ];
+    ["reorder_point_sub", "Safety Stock"], ["main_unit_price", "ราคาต้นทุน"], ["actions", "จัดการ"],
+  ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
 }
 
 function canViewPrices() {
