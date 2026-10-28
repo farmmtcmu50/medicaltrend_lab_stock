@@ -375,17 +375,23 @@ function applyDashboardColumnVisibility() {
   $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", cell.dataset.key!=='dispose_action'&&!visible.has(cell.dataset.key)));
 }
 
+function filterItemMenuRows(items,query='',machine=''){
+ const q=String(query).trim().toLowerCase(),selected=String(machine).trim().toLowerCase();
+ return items.filter(item=>(!selected||String(item.machine||'').toLowerCase()===selected)&&(!q||[item.reagent_name,item.machine,item.supplier].some(value=>String(value||'').toLowerCase().includes(q))));
+}
+
 async function refreshItems() {
   state.stockViewsDirty.add("pr");
-  const q = encodeURIComponent($("#itemSearch").value.trim());
-  const selectedMachine = $("#itemMachineFilter").value.trim();
-  const machine = encodeURIComponent(selectedMachine);
-  const res = await api(`/api/items?q=${q}&machine=${machine}`);
+  // Keep the shared product master complete. Only this menu's rendered rows are filtered.
+  const res = await api('/api/items');
   state.items = res.rows;
+  const q = $("#itemSearch").value;
+  const selectedMachine = $("#itemMachineFilter").value.trim();
+  const visibleItems=filterItemMenuRows(state.items,q,selectedMachine);
   renderMachineFilter($("#itemMachineFilter"), res.machines || [], selectedMachine);
   renderReceiveItems();
   renderManualPrItems();
-  renderTable($("#itemsTable"), itemVisibleColumns(), state.items.map((item) => ({
+  renderTable($("#itemsTable"), itemVisibleColumns(), visibleItems.map((item) => ({
     ...item,
     active_label: Number(item.is_active ?? 1) ? "Active" : "Inactive",
     sub_unit: Number(item.has_sub_unit ?? 1) ? item.sub_unit : "—",

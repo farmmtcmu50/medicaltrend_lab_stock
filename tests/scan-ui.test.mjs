@@ -145,3 +145,16 @@ test('PR refresh ignores dashboard filters and never changes dashboard data',asy
  assert.equal(vm.runInContext('state.dashboard[0].item_id',context),'filtered');assert.equal(vm.runInContext('state.analytics.marker',context),'dashboard');
  vm.runInContext("state.dashboard=[]",context);assert.equal(vm.runInContext('suggestedPrRows().length',context),2);
 });
+
+
+test('item menu filtering retains the full master used by receiving PR and counts',async()=>{
+ const {context}=await workflowContext();context.paths=[];
+ vm.runInContext(`state.items=[];$('#itemSearch').value='Alpha';$('#itemMachineFilter').value='M1';$('#receiveItemSearch').value='Beta';$('#manualPrSearch').value='Beta';state.prSuggestionRows=[{item_id:'suggestion'}];state.dashboard=[{item_id:'dashboard'}];api=async path=>{paths.push(path);return {rows:[{item_id:'A',reagent_name:'Alpha',machine:'M1',supplier:'S1',is_active:1},{item_id:'B',reagent_name:'Beta',machine:'M2',supplier:'S2',is_active:1}],machines:['M1','M2']};};renderMachineFilter=()=>{};renderReceiveItems=()=>{state.receiveMaster=state.items.map(i=>i.item_id);};renderManualPrItems=()=>{state.manualMaster=state.items.map(i=>i.item_id);};renderTable=(table,columns,rows)=>{state.itemMenuResult=rows.map(r=>r.item_id);};`,context);
+ await vm.runInContext('refreshItems()',context);
+ assert.deepEqual(context.paths,['/api/items']);
+ for(const key of ['items','receiveMaster','manualMaster'])assert.equal(vm.runInContext(`state.${key}.length`,context),2);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.itemMenuResult)',context)),['A']);
+ assert.equal(vm.runInContext("$('#receiveItemSearch').value",context),'Beta');assert.equal(vm.runInContext("$('#manualPrSearch').value",context),'Beta');
+ assert.equal(vm.runInContext('state.dashboard[0].item_id',context),'dashboard');assert.equal(vm.runInContext('state.prSuggestionRows[0].item_id',context),'suggestion');
+ vm.runInContext("$('#itemSearch').value='no match'",context);await vm.runInContext('refreshItems()',context);assert.equal(vm.runInContext('state.itemMenuResult.length',context),0);assert.equal(vm.runInContext('state.items.length',context),2);
+});
