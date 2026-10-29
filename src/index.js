@@ -100,6 +100,7 @@ async function api(request, env) {
   if (method === "POST" && path === "/labels") return labelPdf(request, env);
   if (method === "GET" && path === "/reports") return movementReport(request, env, user);
   if (method === "GET" && path === "/pr-suggestions") return dashboard(new Request(new URL("/api/pr-suggestions",request.url)), env, user, false);
+  if (path === '/preferences/item-columns' && ['GET','PUT'].includes(method)) return itemColumnPreferences(request,env,user);
   if (method === "GET" && path === "/purchase-requisitions") return listPurchaseRequisitions(env, user);
   if (method === "POST" && path === "/purchase-requisitions/split") return splitPurchaseRequisitions(request, env, user);
   if (method === "POST" && path === "/purchase-requisitions") return createPurchaseRequisition(request, env, user);
@@ -223,6 +224,22 @@ async function dashboard(request, env, user, includeAnalytics=true) {
     total_value: canViewPrices(user) ? totalValue : null,
     can_view_prices: canViewPrices(user),
   });
+}
+
+const ITEM_COLUMN_KEYS=['active_label','reagent_name','machine','main_unit','sub_unit','sub_per_main','stock_quantity','supplier','lead_time_days','reorder_point_sub','main_unit_price','actions'];
+async function itemColumnPreferences(request,env,user){
+ const key='user_item_columns:'+user.user_id;
+ const allowed=ITEM_COLUMN_KEYS.filter(column=>canViewPrices(user)||column!=='main_unit_price');
+ if(request.method==='GET'){
+  const saved=await settingValue(env,key,'');let columns=null;
+  try{const parsed=JSON.parse(saved);if(Array.isArray(parsed))columns=parsed.filter(column=>allowed.includes(column));}catch{}
+  return json({ok:true,columns:columns?.length?columns:null});
+ }
+ const body=await readBody(request);
+ if(!Array.isArray(body.columns)||!body.columns.length||body.columns.some(column=>!allowed.includes(column)))throw httpError('เลือกอย่างน้อยหนึ่งคอลัมน์ที่มีสิทธิ์แสดง');
+ const columns=[...new Set(body.columns)];
+ await env.DB.prepare('INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(key,JSON.stringify(columns),now()).run();
+ return json({ok:true,columns});
 }
 
 async function listItems(request, env, user) {

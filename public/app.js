@@ -224,6 +224,7 @@ function showLoginError(message) {
 }
 
 async function refreshAll() {
+  await loadItemColumnPreference();
   await Promise.all([refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshPrSuggestions(), refreshStock(), refreshReprintStock()]);
   await Promise.all([refreshReport(), refreshPurchaseRequisitions()]);
   if (state.user.role === "admin") await Promise.all([refreshUsers(), refreshAudit()]);
@@ -415,6 +416,31 @@ async function refreshItems() {
 
 function dashboardVisibleColumns() {
   return dashboardColumns.filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+}
+
+async function loadItemColumnPreference(){
+ const result=await api('/api/preferences/item-columns');state.itemColumns=result.columns;
+}
+function selectedItemColumns(){
+ const all=itemVisibleColumns().map(([key])=>key),valid=(state.itemColumns||all).filter(key=>all.includes(key));
+ return new Set(valid.length?valid:all);
+}
+function applyItemColumnVisibility(){
+ const selected=selectedItemColumns();
+ $$('[data-key]',$('#itemsTable')).forEach(cell=>cell.classList.toggle('hidden',!selected.has(cell.dataset.key)));
+}
+function renderItemColumns(){
+ const host=$('#itemColumns');if(!host)return;const selected=selectedItemColumns();
+ host.innerHTML=itemVisibleColumns().map(([key,label])=>`<label><input type="checkbox" data-item-column="${key}"${selected.has(key)?' checked':''}> ${esc(label)}</label>`).join('');
+ $$('input',host).forEach(box=>box.addEventListener('change',async()=>{
+  const columns=$$('input:checked',host).map(input=>input.dataset.itemColumn);
+  if(!columns.length){box.checked=true;toast('ต้องแสดงอย่างน้อยหนึ่งคอลัมน์',true);return;}
+  const previous=state.itemColumns;state.itemColumns=columns;applyItemColumnVisibility();
+  $$('input',host).forEach(input=>input.disabled=true);$('#itemColumnsStatus').textContent='กำลังบันทึก…';
+  try{const result=await api('/api/preferences/item-columns',{method:'PUT',body:{columns}});state.itemColumns=result.columns;$('#itemColumnsStatus').textContent='บันทึกการตั้งค่าของคุณแล้ว';}
+  catch(error){state.itemColumns=previous;applyItemColumnVisibility();$('#itemColumnsStatus').textContent='บันทึกไม่สำเร็จ: '+error.message;}
+  finally{renderItemColumns();}
+ }));
 }
 
 function itemVisibleColumns() {

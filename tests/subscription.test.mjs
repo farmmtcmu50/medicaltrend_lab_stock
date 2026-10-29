@@ -456,3 +456,20 @@ test('item live stock counts only IN_STOCK units and is available to staff witho
  const visible=await tenantRequest('tenant-a','/api/items?include_stock=1',{cookie:staff});assert.equal(visible.status,200);assert.equal(typeof visible.data.rows[0].stock_quantity,'number');assert.equal(visible.data.rows[0].main_unit_price,undefined);
  const master=await tenantRequest('tenant-a','/api/items',{cookie});assert.equal(master.data.rows[0].stock_quantity,undefined);
 });
+
+test('item column preferences persist per user and enforce role restrictions',async()=>{
+ const cookie=await wfAuth(),path='/api/preferences/item-columns';
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a',path,{cookie})).data.columns,null);
+ const columns=['reagent_name','stock_quantity','main_unit_price'];
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{columns}})).status,200);
+ assert.deepEqual((await tenantRequest('tenant-a',path,{cookie})).data.columns,columns);
+ assert.equal((await tenantRequest('tenant-a',path,{cookie:staff})).data.columns,null);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie:staff,body:{columns:['main_unit_price']}})).status,400);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie:staff,body:{columns:[]}})).status,400);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie:staff,body:{columns:['reagent_name']}})).status,200);
+ assert.deepEqual((await tenantRequest('tenant-a',path,{cookie:staff})).data.columns,['reagent_name']);
+ assert.deepEqual((await tenantRequest('tenant-a',path,{cookie})).data.columns,columns);
+ const fresh=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ assert.deepEqual((await tenantRequest('tenant-a',path,{cookie:fresh})).data.columns,columns);
+});
