@@ -446,3 +446,13 @@ test('PR suggestions ignore dashboard search and analytics filters and protect s
  const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
  const publicRows=await tenantRequest('tenant-a','/api/pr-suggestions',{cookie:staff});assert.equal(publicRows.status,200);assert.ok(publicRows.data.rows.length>0);assert.equal(publicRows.data.analytics,null);assert.equal(publicRows.data.total_value,null);assert.equal(publicRows.data.rows[0].unit_price,undefined);
 });
+
+test('item live stock counts only IN_STOCK units and is available to staff without prices',async()=>{
+ const cookie=await wfAuth();
+ const result=await tenantRequest('tenant-a','/api/items?include_stock=1',{cookie});assert.equal(result.status,200);
+ assert.ok(result.data.rows.length);
+ for(const row of result.data.rows){const expected=await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND status='IN_STOCK'").bind(row.item_id).first();assert.equal(row.stock_quantity,expected.n);}
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const visible=await tenantRequest('tenant-a','/api/items?include_stock=1',{cookie:staff});assert.equal(visible.status,200);assert.equal(typeof visible.data.rows[0].stock_quantity,'number');assert.equal(visible.data.rows[0].main_unit_price,undefined);
+ const master=await tenantRequest('tenant-a','/api/items',{cookie});assert.equal(master.data.rows[0].stock_quantity,undefined);
+});

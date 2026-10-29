@@ -189,7 +189,7 @@ function switchTab(tab) {
   });
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
-  if (tab === "items") resizeItemsTable();
+  if (tab === "items") { resizeItemsTable(); refreshItems().catch(error=>toast(error.message,true)); }
   if (tab === "suppliers") refreshSuppliers().catch(error=>toast(error.message,true));
   if (tab === "operations") refreshOperations().catch(error=>toast(error.message,true));
   if (tab === "counts") refreshCounts().catch(error=>toast(error.message,true));
@@ -383,7 +383,7 @@ function filterItemMenuRows(items,query='',machine=''){
 async function refreshItems() {
   state.stockViewsDirty.add("pr");
   // Keep the shared product master complete. Only this menu's rendered rows are filtered.
-  const res = await api('/api/items');
+  const res = await api('/api/items?include_stock=1');
   state.items = res.rows;
   const q = $("#itemSearch").value;
   const selectedMachine = $("#itemMachineFilter").value.trim();
@@ -399,6 +399,7 @@ async function refreshItems() {
     actions: item.item_id,
   })), {
     active_label: (v) => `<span class="badge ${esc(v.toUpperCase())}">${esc(v)}</span>`,
+    stock_quantity: (value,row) => `${Number(value||0).toLocaleString('th-TH')} ${esc(Number(row.has_sub_unit??1)?row.sub_unit||row.main_unit:row.main_unit||row.sub_unit)}`,
     unit_price: money,
     main_unit_price: (value,row) => `${money(value)} บาท / ${esc(row.main_unit||row.sub_unit||'หน่วย')}`,
     actions: (_, item) => {
@@ -419,7 +420,7 @@ function dashboardVisibleColumns() {
 function itemVisibleColumns() {
   return [
     ["active_label", "สถานะ"], ["reagent_name", "ชื่อ"], ["machine", "เครื่อง"], ["main_unit", "หน่วยหลัก"], ["sub_unit", "หน่วยย่อย"],
-    ["sub_per_main", "ย่อย/หลัก"], ["supplier", "Supplier"], ["lead_time_days", "Lead"],
+    ["sub_per_main", "ย่อย/หลัก"], ["stock_quantity", "คงเหลือใน Stock"], ["supplier", "Supplier"], ["lead_time_days", "Lead"],
     ["reorder_point_sub", "Safety Stock"], ["main_unit_price", "ราคาต้นทุน"], ["actions", "จัดการ"],
   ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
 }

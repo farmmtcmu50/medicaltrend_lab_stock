@@ -229,8 +229,11 @@ async function listItems(request, env, user) {
   const url = new URL(request.url);
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
   const machine = (url.searchParams.get("machine") || "").trim().toLowerCase();
+  const stockColumn=url.searchParams.get('include_stock')==='1'
+    ? ", (SELECT COUNT(*) FROM stock_units s WHERE s.item_id=items.item_id AND s.status='IN_STOCK') AS stock_quantity"
+    : '';
   const rows = await env.DB.prepare(
-    `SELECT * FROM items
+    `SELECT items.*${stockColumn} FROM items
      WHERE is_deleted = 0
        AND (? = '' OR lower(machine) = ?)
        AND (? = '%%' OR lower(reagent_name) LIKE ? OR lower(machine) LIKE ? OR lower(supplier) LIKE ?)

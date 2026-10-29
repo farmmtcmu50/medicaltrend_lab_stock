@@ -151,7 +151,7 @@ test('item menu filtering retains the full master used by receiving PR and count
  const {context}=await workflowContext();context.paths=[];
  vm.runInContext(`state.items=[];$('#itemSearch').value='Alpha';$('#itemMachineFilter').value='M1';$('#receiveItemSearch').value='Beta';$('#manualPrSearch').value='Beta';state.prSuggestionRows=[{item_id:'suggestion'}];state.dashboard=[{item_id:'dashboard'}];api=async path=>{paths.push(path);return {rows:[{item_id:'A',reagent_name:'Alpha',machine:'M1',supplier:'S1',is_active:1},{item_id:'B',reagent_name:'Beta',machine:'M2',supplier:'S2',is_active:1}],machines:['M1','M2']};};renderMachineFilter=()=>{};renderReceiveItems=()=>{state.receiveMaster=state.items.map(i=>i.item_id);};renderManualPrItems=()=>{state.manualMaster=state.items.map(i=>i.item_id);};renderTable=(table,columns,rows)=>{state.itemMenuResult=rows.map(r=>r.item_id);};`,context);
  await vm.runInContext('refreshItems()',context);
- assert.deepEqual(context.paths,['/api/items']);
+ assert.deepEqual(context.paths,['/api/items?include_stock=1']);
  for(const key of ['items','receiveMaster','manualMaster'])assert.equal(vm.runInContext(`state.${key}.length`,context),2);
  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.itemMenuResult)',context)),['A']);
  assert.equal(vm.runInContext("$('#receiveItemSearch').value",context),'Beta');assert.equal(vm.runInContext("$('#manualPrSearch').value",context),'Beta');
@@ -164,4 +164,14 @@ test('item cost column is restricted to admin',async()=>{
  const {context}=await workflowContext();
  vm.runInContext("state.user.role='admin'",context);assert.equal(vm.runInContext("itemVisibleColumns().find(([key])=>key==='main_unit_price')[1]",context),'ราคาต้นทุน');
  vm.runInContext("state.user.role='staff'",context);assert.equal(vm.runInContext("itemVisibleColumns().some(([key])=>priceColumnKeys.has(key))",context),false);
+});
+
+
+test('item stock column uses the smallest enabled unit and is visible to staff',async()=>{
+ const {context}=await workflowContext();context.formats={};
+ vm.runInContext(`$('#itemSearch').value='';$('#itemMachineFilter').value='';api=async()=>({rows:[],machines:[]});renderMachineFilter=()=>{};renderReceiveItems=()=>{};renderManualPrItems=()=>{};renderTable=(table,columns,rows,formatters)=>{formats= formatters;};`,context);
+ await vm.runInContext('refreshItems()',context);
+ assert.match(vm.runInContext("formats.stock_quantity(250,{has_sub_unit:1,sub_unit:'Test',main_unit:'BOX'})",context),/250 Test/);
+ assert.match(vm.runInContext("formats.stock_quantity(4,{has_sub_unit:0,sub_unit:'Test',main_unit:'BOX'})",context),/4 BOX/);
+ assert.equal(vm.runInContext("itemVisibleColumns().some(([key])=>key==='stock_quantity')",context),true);
 });
