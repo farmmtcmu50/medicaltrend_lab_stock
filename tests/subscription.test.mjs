@@ -473,3 +473,27 @@ test('item column preferences persist per user and enforce role restrictions',as
  const fresh=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
  assert.deepEqual((await tenantRequest('tenant-a',path,{cookie:fresh})).data.columns,columns);
 });
+
+test('machine registry canonicalizes item selection, rejects typos, and propagates renames',async()=>{
+ const cookie=await wfAuth(),call=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
+ const created=await call('/api/machines',{name:' Analyzer Registry ',is_active:1});assert.equal(created.status,200,JSON.stringify(created.data));const id=created.data.machine_id;
+ assert.equal((await call('/api/machines',{name:'analyzer registry'})).status,409);
+ const supplier=(await call('/api/suppliers',{name:'Machine test supplier'})).data.supplier_id;
+ const body={reagent_name:'Machine reagent',machine:'analyzer registry',main_unit:'ขวด',has_sub_unit:0,main_unit_price:25,supplier_id:supplier};
+ const added=await call('/api/items',body);assert.equal(added.status,200,JSON.stringify(added.data));const item=added.data.item_id;
+ assert.equal((await aDb.prepare('SELECT machine FROM items WHERE item_id=?').bind(item).first()).machine,'Analyzer Registry');
+ assert.equal((await call('/api/items',{...body,machine:'Analyzer Registr'})).status,400);
+ const received=await wfPost('/api/receive',{request_id:randomUUID(),item_id:item,lot:'MACHINE-LOT',expiry_date:'2030-12-31',quantity:2},cookie);assert.equal(received.status,200,JSON.stringify(received.data));
+ assert.equal((await call('/api/machines/'+id,{name:'Analyzer Renamed',is_active:1},'PUT')).status,200);
+ assert.equal((await aDb.prepare('SELECT machine FROM items WHERE item_id=?').bind(item).first()).machine,'Analyzer Renamed');
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM stock_units WHERE item_id=? AND status='IN_STOCK' AND machine='Analyzer Renamed'").bind(item).first()).n,2);
+ assert.equal((await call('/api/machines/'+id,{name:'Analyzer Renamed',is_active:0},'PUT')).status,200);
+ assert.equal((await call('/api/items',{...body,machine:'Analyzer Renamed'})).status,400);
+ assert.equal((await call('/api/items/'+item,{...body,machine:'Analyzer Renamed'},'PUT')).status,200);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/machines',{cookie:staff})).status,200);
+ assert.equal((await tenantRequest('tenant-a','/api/machines',{method:'POST',cookie:staff,body:{name:'Forbidden'}})).status,403);
+ const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.machines.some(row=>row.machine_id===id));
+ assert.equal((await call('/api/restore',backup.data)).status,200);
+ assert.equal((await aDb.prepare('SELECT name FROM machines WHERE machine_id=?').bind(id).first()).name,'Analyzer Renamed');
+});

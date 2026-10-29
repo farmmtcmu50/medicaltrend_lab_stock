@@ -1,6 +1,7 @@
 const state = {
   user: null,
   items: [],
+  machines: [],
   dashboard: [],
   prSuggestionRows: [],
   dashboardCardFilter: "all",
@@ -131,6 +132,11 @@ function bindUi() {
   $("#clearPrBtn").addEventListener("click", clearPurchaseRequisition);
   $("#cancelEditPrBtn").addEventListener("click", cancelPurchaseRequisitionEdit);
 
+  $('#machineSearchBtn').addEventListener('click',()=>renderMachineRegistry());
+  $('#machineSearch').addEventListener('input',()=>renderMachineRegistry());
+  $('#newMachineBtn').addEventListener('click',()=>openMachineForm());
+  $('#closeMachineBtn').addEventListener('click',()=>$('#machineDialog').close());
+  $('#machineForm').addEventListener('submit',saveMachine);
   const itemForm = $("#itemForm");
   itemForm.addEventListener("submit", saveItem);
   itemForm.has_sub_unit.addEventListener("change", syncItemUnits);
@@ -190,6 +196,7 @@ function switchTab(tab) {
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
   if (tab === "items") { resizeItemsTable(); refreshItems().catch(error=>toast(error.message,true)); }
+  if (tab === "machines") refreshMachineRegistry().catch(error=>toast(error.message,true));
   if (tab === "suppliers") refreshSuppliers().catch(error=>toast(error.message,true));
   if (tab === "operations") refreshOperations().catch(error=>toast(error.message,true));
   if (tab === "counts") refreshCounts().catch(error=>toast(error.message,true));
@@ -225,7 +232,7 @@ function showLoginError(message) {
 
 async function refreshAll() {
   await loadItemColumnPreference();
-  await Promise.all([refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshPrSuggestions(), refreshStock(), refreshReprintStock()]);
+  await Promise.all([refreshMachineMaster(), refreshSupplierMaster(), refreshSettings(), refreshItems(), refreshDashboard(), refreshPrSuggestions(), refreshStock(), refreshReprintStock()]);
   await Promise.all([refreshReport(), refreshPurchaseRequisitions()]);
   if (state.user.role === "admin") await Promise.all([refreshUsers(), refreshAudit()]);
   if (location.hash) switchTab(location.hash.slice(1));
@@ -1130,6 +1137,7 @@ function editItem(id) {
   const item = state.items.find((x) => x.item_id === id);
   const form = $("#itemForm");
   renderSupplierOptions(item.supplier_id);
+  renderMachineOptions(item.machine);
   Object.entries(item).forEach(([k, v]) => { if (form[k]) form[k].value = v ?? ""; });
   form.item_id.value = id;
   form.has_sub_unit.checked = Number(item.has_sub_unit ?? 1) === 1;
@@ -1164,7 +1172,7 @@ async function toggleItemActive(id) {
 function resetItemForm() {
   $("#itemForm").reset();
   $("#itemForm").item_id.value = "";
-  $("#itemForm").machine.value = "Manual";
+  renderMachineOptions("Manual");
   $("#itemForm").sub_per_main.value = 1;
   $("#itemForm").unit_price.value = 0;
   $("#itemForm").main_unit_price.value = 0;
@@ -1921,6 +1929,26 @@ function openAnalyticsDetails(key,filter={}){
  $('#analyticsDetailsTitle').textContent=title;renderTable($('#analyticsDetailsTable'),columns,rows,{dispose_action:v=>v,actions:v=>v,opening_value:money,closing_value:money,average_value:money,used_value:money,received_value:money,wasted_value:money,turnover:v=>v===null?'—':Number(v).toFixed(2)});
  $$('[data-delivery]').forEach(button=>button.addEventListener('click',()=>{const row=a.deliveries.find(r=>r.pr_id===button.dataset.delivery),form=$('#deliveryTermsForm');form.pr_id.value=row.pr_id;form.issued_date.value=row.issued_date||'';form.expected_date.value=row.expected_date||'';$('#deliveryTermsDialog').showModal();}));
  $('#analyticsDetailsDialog').showModal();
+}
+
+function renderMachineOptions(selected=$('#itemForm').machine.value){
+ const select=$('#itemForm').machine;
+ select.innerHTML='<option value="">เลือกจากทะเบียนเครื่อง</option>'+state.machines.filter(row=>row.is_active||row.name===selected).map(row=>`<option value="${esc(row.name)}">${esc(row.name)}${row.is_active?'':' (ปิดใช้งาน)'}</option>`).join('');
+ select.value=selected||'';
+}
+async function refreshMachineMaster(){const result=await api('/api/machines');state.machines=result.rows;renderMachineOptions();}
+async function refreshMachineRegistry(){await refreshMachineMaster();renderMachineRegistry();}
+function renderMachineRegistry(){
+ const q=$('#machineSearch').value.trim().toLowerCase(),rows=state.machines.filter(row=>row.name.toLowerCase().includes(q));
+ renderTable($('#machinesTable'),[['name','ชื่อเครื่อง'],['item_count','จำนวนสินค้า'],['is_active','สถานะ'],['actions','จัดการ']],rows,{is_active:value=>value?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,row)=>state.user.role==='admin'?`<button data-edit-machine="${esc(row.machine_id)}">แก้ไข</button>`:''});
+ $$('[data-edit-machine]').forEach(button=>button.addEventListener('click',()=>openMachineForm(button.dataset.editMachine)));
+}
+function openMachineForm(id){
+ const row=state.machines.find(row=>row.machine_id===id),form=$('#machineForm');form.reset();form.machine_id.value=id||'';form.name.value=row?.name||'';form.is_active.checked=row?Boolean(row.is_active):true;$('#machineFormError').textContent='';$('#machineDialog').showModal();
+}
+async function saveMachine(event){
+ event.preventDefault();const form=event.target,button=form.querySelector('button[type="submit"],button.primary');button.disabled=true;
+ try{await api('/api/machines'+(form.machine_id.value?'/'+encodeURIComponent(form.machine_id.value):''),{method:form.machine_id.value?'PUT':'POST',body:{name:form.name.value,is_active:form.is_active.checked?1:0}});$('#machineDialog').close();await Promise.all([refreshMachineRegistry(),refreshItems(),refreshDashboard(),refreshPrSuggestions()]);state.stockViewsDirty.add('reprint');toast('บันทึกทะเบียนเครื่องแล้ว');}catch(error){$('#machineFormError').textContent=error.message;}finally{button.disabled=false;}
 }
 
 function renderSupplierOptions(selected=$('#itemForm').supplier_id.value){

@@ -1,3 +1,4 @@
+import { resolveMachine, machineApi } from './machines.js';
 import { resolveSupplier, supplierApi } from "./suppliers.js";
 import { analytics, period } from "./analytics.js";
 import QRCode from "qrcode";
@@ -86,6 +87,7 @@ async function api(request, env) {
     return json({ok:true});
   }
   if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
+  if (path === '/machines' || path.startsWith('/machines/')) return json(await machineApi(request,env,user,{readBody}));
   if (path === '/suppliers' || path.startsWith('/suppliers/')) return json(await supplierApi(request,env,user,{readBody,logAudit}));
   if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
@@ -272,7 +274,7 @@ async function machineOptions(env, activeOnly = false) {
 
 async function addItem(request, env, user) {
   const body=await readBody(request);
-  const data = {...cleanItem(body),...await resolveSupplier(env,body)};
+  const data = {...cleanItem(body),...await resolveSupplier(env,body),...await resolveMachine(env,body)};
   const itemId = nextId("ITM");
   await env.DB.prepare(
     `INSERT INTO items
@@ -288,7 +290,7 @@ async function addItem(request, env, user) {
 async function updateItem(request, env, user, itemId) {
   const before = await getExistingItem(env, itemId);
   const body=await readBody(request);
-  const data = {...cleanItem(body),...await resolveSupplier(env,body,before.supplier_id)};
+  const data = {...cleanItem(body),...await resolveSupplier(env,body,before.supplier_id),...await resolveMachine(env,body,before.machine)};
   const unitsChanged = data.main_unit !== before.main_unit || data.sub_unit !== before.sub_unit
     || data.sub_per_main !== Number(before.sub_per_main) || data.has_sub_unit !== Number(before.has_sub_unit ?? 1);
   if (unitsChanged) {
@@ -874,7 +876,7 @@ async function backup(env, user) {
     },
   };
   if (canViewPrices(user)) {
-    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers"]) data.tables[table]=await tableRows(env,table);
+    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers","machines"]) data.tables[table]=await tableRows(env,table);
     data.tables.users = await tableRows(env, "users");
     data.tables.audit_logs = await tableRows(env, "audit_logs");
   }
@@ -892,7 +894,7 @@ async function restore(request, env, admin) {
     throw httpError(`ไฟล์ backup ไม่มี admin ที่ใช้อีเมล ${env.ACCESS_EMAIL} การ restore จะทำให้เข้าระบบไม่ได้`, 400);
   }
   const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
-  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers"]) safety.tables[table]=await tableRows(env,table);
+  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers","machines"]) safety.tables[table]=await tableRows(env,table);
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -937,8 +939,12 @@ async function replaceTables(env, tables) {
     tables={...tables,suppliers:[...registry.values()]};
   }
 
-  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","suppliers","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
-  const order = ["suppliers", "items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
+  if(!tables.machines){
+    const names=new Map([['manual','Manual']]);for(const item of tables.items||[]){const name=String(item.machine||'Manual').trim()||'Manual';names.set(name.toLowerCase(),name);}
+    tables.machines=[...names.values()].map(name=>({machine_id:crypto.randomUUID(),name,is_active:1,created_at:now(),updated_at:now()}));
+  }
+  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","suppliers","machines","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
+  const order = ["machines", "suppliers", "items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
   for (const table of order) {
     for (const row of tables[table] || []) {
       const keys = Object.keys(row);
