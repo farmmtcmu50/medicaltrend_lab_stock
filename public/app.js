@@ -408,6 +408,8 @@ async function refreshItems() {
       return `<div class="row-actions"><button data-edit-item="${item.item_id}">แก้ไข</button><button data-item-lots="${esc(item.item_id)}">จัดการ Lot</button><button data-toggle-item="${item.item_id}" class="${active ? "warning" : "primary"}">${active ? "Inactive" : "Active"}</button><button class="danger" data-delete-item="${item.item_id}">ลบ</button></div>`;
     },
   });
+  renderItemColumns();
+  applyItemColumnVisibility();
   $$("[data-edit-item]").forEach((btn) => btn.addEventListener("click", () => editItem(btn.dataset.editItem)));
   $$('[data-item-lots]').forEach(button=>button.addEventListener('click',()=>openItemLots(button.dataset.itemLots).catch(e=>toast(e.message,true))));
   $$("[data-toggle-item]").forEach((btn) => btn.addEventListener("click", () => toggleItemActive(btn.dataset.toggleItem)));

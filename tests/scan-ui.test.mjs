@@ -26,7 +26,7 @@ test('scan updates only the affected row and defers hidden views',async()=>{
 async function workflowContext(){
  const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace('boot();','');
  const cache=new Map(),elements=new Map();
- const context=vm.createContext({console,setTimeout,clearTimeout,window:{addEventListener(){}},location:{hash:''},crypto:{randomUUID:()=>`request-${Math.random()}`},localStorage:{getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v),removeItem:k=>cache.delete(k)},document:{querySelector:selector=>{if(!elements.has(selector))elements.set(selector,{classList:{toggle(){},remove(){}},textContent:'',innerHTML:''});return elements.get(selector);},querySelectorAll:()=>[]}});
+ const context=vm.createContext({console,setTimeout,clearTimeout,window:{addEventListener(){}},location:{hash:''},crypto:{randomUUID:()=>`request-${Math.random()}`},localStorage:{getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v),removeItem:k=>cache.delete(k)},document:{querySelector:selector=>{if(!elements.has(selector))elements.set(selector,{classList:{toggle(){},remove(){}},textContent:'',innerHTML:'',querySelectorAll:()=>[]});return elements.get(selector);},querySelectorAll:()=>[]}});
  vm.runInContext(source,context);vm.runInContext("state.user={username:'test-user',role:'staff'};refreshAll=async()=>{};toast=()=>{};",context);
  return {context,cache};
 }
@@ -174,4 +174,14 @@ test('item stock column uses the smallest enabled unit and is visible to staff',
  assert.match(vm.runInContext("formats.stock_quantity(250,{has_sub_unit:1,sub_unit:'Test',main_unit:'BOX'})",context),/250 Test/);
  assert.match(vm.runInContext("formats.stock_quantity(4,{has_sub_unit:0,sub_unit:'Test',main_unit:'BOX'})",context),/4 BOX/);
  assert.equal(vm.runInContext("itemVisibleColumns().some(([key])=>key==='stock_quantity')",context),true);
+});
+
+
+test('loading the item menu renders column checkboxes and applies saved visibility',async()=>{
+ const {context}=await workflowContext();context.visibility=[];
+ vm.runInContext(`state.itemColumns=['reagent_name'];$('#itemSearch').value='';$('#itemMachineFilter').value='';$('#itemsTable').querySelectorAll=()=>[{dataset:{key:'reagent_name'},classList:{toggle:(name,hidden)=>visibility.push(['reagent_name',hidden])}},{dataset:{key:'machine'},classList:{toggle:(name,hidden)=>visibility.push(['machine',hidden])}}];api=async()=>({rows:[],machines:[]});renderMachineFilter=()=>{};renderReceiveItems=()=>{};renderManualPrItems=()=>{};renderTable=()=>{};`,context);
+ await vm.runInContext('refreshItems()',context);
+ assert.match(vm.runInContext("$('#itemColumns').innerHTML",context),/data-item-column="reagent_name" checked/);
+ assert.match(vm.runInContext("$('#itemColumns').innerHTML",context),/data-item-column="machine"/);
+ assert.deepEqual(JSON.parse(JSON.stringify(context.visibility)),[['reagent_name',false],['machine',true]]);
 });
