@@ -4,19 +4,24 @@ import {createRequire} from 'node:module';
 import {readFile,readdir,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {addMonths,digest} from '../subscription/src/security.js';
-import {SignJWT,exportJWK,generateKeyPair} from 'jose';
+import {digest} from '../src/security.js';
 const require=createRequire(import.meta.resolve('wrangler'));
 const {Miniflare,convertV4MiniflareOptions}=require('miniflare'),esbuild=require('esbuild');
-let mf,db,aDb,bDb,ownerToken,tenantA,tenantB;
-const TEAM='https://medicaltrend.cloudflareaccess.com',AUD='control-aud-test';
-const origin='https://control.example';
-const password='a-secure-test-password-2026';
-let strangerToken;
-async function request(path,{method='GET',body,token=ownerToken,cookie,from=origin}={}){
- const response=await mf.dispatchFetch(origin+path,{method,headers:{...(token?{'cf-access-jwt-assertion':token}:{}),...(cookie?{cookie}:{}),...(from?{origin:from}:{}),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
- return {status:response.status,data:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]};
-}
+let mf,db,aDb,bDb;
+// The real control plane lives in the medical-trend-subscriptions repository (its tests cover
+// POST /internal/subscription). Here a stub with the same contract backs the SUBSCRIPTIONS binding
+// so tenant isolation, expiry and suspension can be tested against the stock Worker alone.
+const CONTROL_STUB=`const enc=new TextEncoder();
+const sha=async v=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(v))),n=>n.toString(16).padStart(2,'0')).join('');
+export default {async fetch(request,env){
+ if(new URL(request.url).pathname!=='/internal/subscription'||request.method!=='POST')return Response.json({ok:false},{status:404});
+ const b=await request.json(),t=await env.CONTROL_DB.prepare('SELECT * FROM tenants WHERE id=?').bind(String(b.tenant_id||'')).first();
+ if(!t)return Response.json({ok:false},{status:404});
+ const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
+ if(!t.service_token_hash||await sha(token)!==t.service_token_hash)return Response.json({ok:false},{status:401});
+ const status=t.status==='suspended'?'suspended':new Date(t.expires_at)<=new Date()?'expired':t.status;
+ return Response.json({ok:true,tenant_id:t.id,name:t.name,status,expires_at:t.expires_at,ready:t.provision_status==='ready'});
+}};`;const password='a-secure-test-password-2026';
 async function tenantRequest(name,path,{method='GET',body,cookie,from}={}){
  const url='https://'+name+'.example';
  const response=await mf.dispatchFetch(url+path,{method,headers:{...(cookie?{cookie}:{}),origin:from||url,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
@@ -25,40 +30,18 @@ async function tenantRequest(name,path,{method='GET',body,cookie,from}={}){
 async function sql(db,source){for(const statement of source.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();}
 before(async()=>{
  await mkdir(resolve('work'),{recursive:true});
- const key=await generateKeyPair('RS256'),jwks={keys:[{...await exportJWK(key.publicKey),kid:'k1',alg:'RS256'}]};
- const accessToken=email=>new SignJWT({email}).setProtectedHeader({alg:'RS256',kid:'k1'}).setIssuer(TEAM).setAudience(AUD).setIssuedAt().setExpirationTime('1h').sign(key.privateKey);
- ownerToken=await accessToken('chanat@medicaltrend.co.th');strangerToken=await accessToken('admin@customer.example');
  const bundle=async file=>(await esbuild.build({entryPoints:[file],bundle:true,write:false,format:'esm',platform:'browser',mainFields:['browser','module','main'],conditions:['workerd','browser'],logLevel:'silent'})).outputFiles[0].text;
- const [control,stock]=await Promise.all([bundle('subscription/src/index.js'),bundle('src/index.js')]);
+ const stock=await bundle('src/index.js');
  const tenant=(name,tid,serviceToken)=>({name,routes:[name+'.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:stock}],compatibilityDate:'2026-08-31',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:name+'-db'},serviceBindings:{SUBSCRIPTIONS:'control'},bindings:{TENANT_ID:tid,SESSION_SECRET:'same-secret-for-explicit-tenant-boundary-test',SUBSCRIPTION_TOKEN:serviceToken,TENANT_SETUP_TOKEN:'setup-'+name,SESSION_COOKIE:'stock_session'}});
- mf=new Miniflare(convertV4MiniflareOptions({defaultPersistRoot:resolve('work/test-runtime-'+randomUUID()),workers:[{name:'control',routes:['control.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:control}],compatibilityDate:'2026-08-31',d1Databases:{CONTROL_DB:'control-db'},bindings:{ADMIN_EMAIL:'chanat@medicaltrend.co.th',ACCESS_TEAM_DOMAIN:TEAM,ACCESS_AUD:AUD},outboundService:async r=>r.url===TEAM+'/cdn-cgi/access/certs'?Response.json(jwks):new Response('',{status:599})},tenant('tenant-a','tenant-a','service-a'),tenant('tenant-b','tenant-b','service-b')]}));
+ mf=new Miniflare(convertV4MiniflareOptions({defaultPersistRoot:resolve('work/test-runtime-'+randomUUID()),workers:[{name:'control',routes:['control.example/*'],modules:[{type:'ESModule',path:'worker.js',contents:CONTROL_STUB}],compatibilityDate:'2026-08-31',d1Databases:{CONTROL_DB:'control-db'}},tenant('tenant-a','tenant-a','service-a'),tenant('tenant-b','tenant-b','service-b')]}));
  db=await mf.getD1Database('CONTROL_DB','control');aDb=await mf.getD1Database('DB','tenant-a');bDb=await mf.getD1Database('DB','tenant-b');
- for(const file of (await readdir('subscription/migrations')).sort())await sql(db,await readFile('subscription/migrations/'+file,'utf8'));
+ await sql(db,'CREATE TABLE tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, expires_at TEXT NOT NULL, provision_status TEXT NOT NULL, service_token_hash TEXT)');
+ for(const [tid,name,secret]of [['tenant-a','A','service-a'],['tenant-b','B','service-b']])
+  await db.prepare("INSERT INTO tenants(id,name,status,expires_at,provision_status,service_token_hash) VALUES (?,?,'active','2099-12-31T00:00:00.000Z','ready',?)").bind(tid,name,await digest(secret)).run();
  for(const file of (await readdir('migrations')).sort()){const content=await readFile('migrations/'+file,'utf8');await sql(aDb,content);await sql(bDb,content);}
  for(const database of [aDb,bDb])await database.prepare("INSERT INTO suppliers(supplier_id,name,created_at,updated_at) VALUES('test-supplier','Test Supplier',datetime('now'),datetime('now'))").run();
 });
 after(async()=>{await mf?.dispose();});
-test('calendar renewal clamps month end and preserves leap years',()=>{
- assert.equal(addMonths('2026-01-31T12:00:00.000Z',1),'2026-02-28T12:00:00.000Z');
- assert.equal(addMonths('2028-01-31T12:00:00.000Z',1),'2028-02-29T12:00:00.000Z');
-});
-test('control API requires an Access identity of the owner and rejects cross-origin writes',async()=>{
- assert.equal((await request('/api/tenants',{token:null})).status,401);
- assert.equal((await request('/api/tenants',{token:strangerToken})).status,403);
- assert.equal((await request('/api/tenants',{method:'POST',from:'https://evil.example',body:{}})).status,403);
- assert.equal((await request('/api/me')).status,200);
-});
-test('owner can create independent customers and cannot reuse their slug',async()=>{
- const input={name:'Customer A',slug:'customer-a',contact_email:'a@example.com',plan_id:'standard',trial_days:14};
- const created=await request('/api/tenants',{method:'POST',body:input});assert.equal(created.status,201);assert.equal(created.data.tenant.provision_status,'pending');assert.equal('service_token_hash' in created.data.tenant,false);
- assert.equal((await request('/api/tenants',{method:'POST',body:input})).status,409);
- assert.equal((await request('/api/tenants',{method:'POST',body:{...input,slug:'invalid/slug'}})).status,400);
- const until='2026-12-31T00:00:00.000Z';
- for(const [tid,slug,name,secret]of [['tenant-a','tenant-a','A','service-a'],['tenant-b','tenant-b','B','service-b']]){
-  await db.prepare(`INSERT INTO tenants(id,slug,name,contact_email,plan_id,status,expires_at,provision_status,database_id,database_name,service_token_hash,created_at,updated_at) VALUES (?,?,?,?,'standard','active',?,'ready',?,?,?,?,?)`).bind(tid,slug,name,name+'@example.com',until,tid+'-db',tid+'-db',await digest(secret),'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z').run();
- }
- tenantA=await db.prepare("SELECT * FROM tenants WHERE id='tenant-a'").first();tenantB=await db.prepare("SELECT * FROM tenants WHERE id='tenant-b'").first();
-});
 test('customer passwords have no defaults and sessions are bound to their tenant',async()=>{
  assert.equal((await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password:'1111'}})).status,401);
  assert.equal((await aDb.prepare('SELECT COUNT(*) AS n FROM users').first()).n,0);
@@ -67,7 +50,6 @@ test('customer passwords have no defaults and sessions are bound to their tenant
  const login=await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'admin',password}});assert.equal(login.status,200);
  assert.equal((await tenantRequest('tenant-a','/api/me',{cookie:login.cookie})).status,200);
  assert.equal((await tenantRequest('tenant-b','/api/me',{cookie:login.cookie})).status,401);
- assert.equal((await request('/api/me',{token:null,cookie:login.cookie})).status,401);
 });
 test('items, prices, units and backups stay in the selected customer database',async()=>{
  const insert=async(db,name,price,main,sub)=>db.prepare(`INSERT INTO items(item_id,reagent_name,unit_price,main_unit,sub_unit,created_at,updated_at) VALUES ('shared-id',?,?,?,?,?,?)`).bind(name,price,main,sub,new Date().toISOString(),new Date().toISOString()).run();
@@ -90,32 +72,6 @@ test('expiry permits reading/export and blocks writes; suspension blocks access;
  await db.prepare("UPDATE tenants SET status='active',service_token_hash='wrong' WHERE id='tenant-a'").run();
  assert.equal((await tenantRequest('tenant-a','/api/me',{cookie:login.cookie})).status,503);
  await db.prepare("UPDATE tenants SET service_token_hash=? WHERE id='tenant-a'").bind(await digest('service-a')).run();
-});
-test('manual payments are idempotent and optimistic concurrency prevents double extensions',async()=>{
- const tid=randomUUID();await db.prepare(`INSERT INTO tenants(id,slug,name,contact_email,plan_id,status,expires_at,provision_status,created_at,updated_at) VALUES (?,'billing-test','Billing','billing@example.com','standard','trial','2026-01-01T00:00:00.000Z','ready','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`).bind(tid).run();
- const payment={months:1,amount_satang:99000,reference:'BANK-TEST-001',plan_id:'standard',version:0,request_key:randomUUID()};
- const first=await request(`/api/tenants/${tid}/renew`,{method:'POST',body:payment});assert.equal(first.status,200);assert.equal(first.data.tenant.status,'active');assert.equal(first.data.tenant.version,1);
- const repeated=await request(`/api/tenants/${tid}/renew`,{method:'POST',body:payment});assert.equal(repeated.status,200);assert.equal(repeated.data.duplicate,true);
- const stale=await request(`/api/tenants/${tid}/renew`,{method:'POST',body:{...payment,request_key:randomUUID()}});assert.equal(stale.status,409);
- assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM payments WHERE tenant_id=?').bind(tid).first()).n,1);
- const competing=await Promise.all([1,2].map(n=>request(`/api/tenants/${tid}/renew`,{method:'POST',body:{...payment,version:1,request_key:randomUUID(),reference:'race-'+n}})));
- assert.deepEqual(competing.map(r=>r.status).sort(),[200,409]);
- assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM payments WHERE tenant_id=?').bind(tid).first()).n,2);
- const suspend=await request(`/api/tenants/${tid}/status`,{method:'POST',body:{status:'suspended',reason:'test hold',version:2}});assert.equal(suspend.status,200);
- assert.equal((await request(`/api/tenants/${tid}/renew`,{method:'POST',body:{...payment,version:3,request_key:randomUUID()}})).status,409);
-});
-test('package prices persist and stale status writes leave no misleading audit event',async()=>{
- assert.equal((await request('/api/plans/standard',{method:'PUT',body:{name:'Standard',monthly_price_satang:99000,description:'Monthly subscription'}})).status,200);
- assert.equal((await request('/api/plans')).data.rows.find(p=>p.id==='standard').monthly_price_satang,99000);
- assert.equal((await request('/api/plans/standard',{method:'PUT',body:{name:'Standard',monthly_price_satang:-1}})).status,400);
- const t=(await request('/api/tenants')).data.rows.find(t=>t.slug==='billing-test');
- const before=(await db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id=? AND action='STATUS_CHANGED'").bind(t.id).first()).n;
- assert.equal((await request(`/api/tenants/${t.id}/status`,{method:'POST',body:{status:'suspended',reason:'stale test',version:t.version-1}})).status,409);
- assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id=? AND action='STATUS_CHANGED'").bind(t.id).first()).n,before);
-});
-test('control has no password or session endpoints; logout is handled by Access',async()=>{
- for(const path of ['/api/password','/api/login','/api/logout','/api/setup'])assert.equal((await request(path,{method:path==='/api/password'?'PUT':'POST',body:{}})).status,404,path);
- const me=await request('/api/me');assert.equal(me.data.logout_url,'/cdn-cgi/access/logout');assert.equal(me.cookie,undefined);
 });
 
 test('indexed QR scans preserve FEFO, mixed-case codes and partial packages', async () => {
@@ -242,7 +198,7 @@ test('PR partial receipts track outstanding quantities, reject overdelivery and 
 });
 test('staff can submit counts but cannot approve or reverse; full backup restores workflow history',async()=>{
  const time=new Date().toISOString();const staffSalt='workflow-staff-salt';
- const {passwordHash}=await import('../subscription/src/security.js');
+ const {passwordHash}=await import('../src/security.js');
  await aDb.prepare("INSERT INTO users(user_id,username,password_hash,salt,role,is_active,created_at,updated_at) VALUES ('wf-staff','wf-staff',?,?,'staff',1,?,?)").bind(await passwordHash(password,staffSalt),staffSalt,time,time).run();
  const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
  const submitted=await wfPost('/api/stock-counts',{item_id:workflowItem,lot:'STAFF',expiry_date:'2029-01-01',counted_qty:1,reason:'นับโดยเจ้าหน้าที่'},staff);assert.equal(submitted.status,200);

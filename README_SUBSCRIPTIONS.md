@@ -5,7 +5,7 @@
 
 ## โครงสร้าง
 
-- `subscription/`: Worker ส่วนกลาง `medical-trend-subscriptions` และ D1 ส่วนกลาง
+- Worker ส่วนกลาง `medical-trend-subscriptions` และ D1 ส่วนกลาง: repo medical-trend-subscriptions
 - `src/index.js`: โปรแกรม Stock ชุดเดิม ใช้ร่วมกันโดย deploy Worker แยกลูกค้า
 - ลูกค้าแต่ละราย: Worker `mt-stock-<slug>`, D1 `mt-stock-<slug>`, secrets ของตัวเอง
 - Worker ลูกค้าตรวจสิทธิ์กับส่วนกลางผ่าน Service Binding และ token เฉพาะราย
@@ -13,40 +13,15 @@
 - Worker เดิม `medical-trend-lab-stock` ไม่ได้เพิ่ม `TENANT_ID` จึงยังทำงานแบบเดิม
   ไม่ย้ายหรือคัดลอกฐานข้อมูลจริงเข้า SaaS อัตโนมัติ
 
-## ติดตั้ง
+## ติดตั้งระบบส่วนกลาง
 
-ต้องมี Node.js และ dependencies ตาม `pnpm-lock.yaml`
+ระบบส่วนกลาง (Worker `medical-trend-subscriptions`, D1 ส่วนกลาง, หน้าผู้ดูแล) แยกไปอยู่ที่ repo
+[medical-trend-subscriptions](https://github.com/farmmtcmu50/medical-trend-subscriptions) แล้ว
+ติดตั้ง/อัปเดต/ทดสอบส่วนกลางจาก repo นั้น (`npm run setup`, `npm test`)
 
-```sh
-pnpm install --frozen-lockfile
-npx wrangler login
-npm run subscription:setup
-```
-
-คำสั่ง setup สร้างฐานข้อมูลส่วนกลางใหม่, บันทึก database_id ใน
-`subscription/wrangler.jsonc`, รัน migrations และ deploy ระบบส่วนกลาง
-URL เดียวคือ https://subscriptions.medicaltrend.stream (Custom Domain, ปิด workers.dev แล้ว)
-เว็บ stock.medicaltrend.stream แยกตามเดิม
-
-ระบบส่วนกลางไม่มีรหัสผ่าน: ต้องมี Access application ของโดเมนนี้และตั้ง secret `ACCESS_AUD` ก่อน
-(ดู `docs/cloudflare-access.md`) แล้วเข้าด้วยรหัส One-time PIN ของ `ADMIN_EMAIL`
-(`chanat@medicaltrend.co.th`) การเข้าครั้งแรกจะสร้างบัญชี owner ให้อัตโนมัติ
-
-การรัน setup ซ้ำกับฐานที่ระบุ ID แล้วจะอัปเดตตารางและ Worker โดยรักษาข้อมูลเดิม
-ถ้าพบฐานชื่อเดียวกันแต่ config ยังไม่มี ID คำสั่งจะหยุดให้ผู้ดูแลตรวจฐานก่อน
-เมื่อเปลี่ยนเครื่อง config กลางใน Git ต้องมี database_id ที่ถูกต้อง และต้องล็อกอิน Cloudflare ใหม่
-
-## ใช้บนเครื่อง
-
-```sh
-npm run subscription:setup -- --local
-npm run subscription:dev
-```
-
-เปิด `http://127.0.0.1:8790` บนเครื่องข้าม Access ด้วย `DEV_ACCESS_EMAIL` ใน `subscription/.dev.vars`
-(setup --local สร้างไฟล์นี้จาก `.dev.vars.example` ถ้ายังไม่มี และไม่เขียนทับไฟล์ที่มีอยู่) ฐาน local และ remote แยกจากกัน
-หาก remote setup เปลี่ยน database_id ระหว่าง dev ให้รัน setup --local และเปิด dev ใหม่
-เพื่อสร้างตาราง local ให้ตรง binding
+repo นี้เก็บเฉพาะฝั่งลูกค้า: `src/subscription.js` (เรียก `POST /internal/subscription` ผ่าน Service Binding)
+และ `scripts/subscription.mjs` (provision/update/backup) ซึ่งอ่านทะเบียนลูกค้าจาก D1 ส่วนกลาง
+ตาม `scripts/control-plane.wrangler.json` หากย้ายฐานส่วนกลาง ต้องแก้ database_id ในไฟล์นี้ด้วย
 
 ## เปิดลูกค้าใหม่
 
@@ -120,13 +95,13 @@ update อ่าน ID จากทะเบียน, สร้าง config, �
 
 ```sh
 npm run test:subscription
-npm run subscription:check
 npm run check
 ```
 
-Tests ใช้ workerd/Miniflare จริงพร้อมฐาน D1 ของ control และลูกค้า A/B แยกกัน
-ทดสอบ Access JWT ของส่วนกลาง, CSRF, tenant isolation, สินค้า/ราคา/หน่วย/backup, expiry,
-suspension, payment idempotency/concurrency และ calendar month (`npm run test:access` ทดสอบ 401/403/role ของ Access)
+Tests ใช้ workerd/Miniflare จริง ฐาน D1 ของลูกค้า A/B แยกกัน และ stub ของส่วนกลางที่ตอบตามสัญญา
+`/internal/subscription` เดียวกับระบบจริง ทดสอบ tenant isolation, สินค้า/ราคา/หน่วย/backup, expiry และ suspension
+(`npm run test:access` ทดสอบ 401/403/role ของ Access ฝั่ง stock)
+การทดสอบ API ส่วนกลาง, payment และสัญญา `/internal/subscription` อยู่ใน repo medical-trend-subscriptions
 
 ยังไม่รวม payment gateway, ออกใบกำกับภาษี, quota ตามแพ็กเกจ, self-service signup,
 custom domain อัตโนมัติ หรือ automatic provisioning จากหน้าจอ

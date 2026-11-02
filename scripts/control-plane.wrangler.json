@@ -1,0 +1,11 @@
+{
+  "name": "medical-trend-subscriptions",
+  "compatibility_date": "2026-08-31",
+  "d1_databases": [
+    {
+      "binding": "CONTROL_DB",
+      "database_name": "medical-trend-subscriptions",
+      "database_id": "6cf3bacf-2240-47cb-82c9-71542f4a876f"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import {digest,equal,fail,passwordHash,randomToken,validatePassword} from '../subscription/src/security.js';
+import {digest,equal,fail,passwordHash,randomToken,validatePassword} from './security.js';
 
 export async function subscriptionGate(request,env){
   if(!env.TENANT_ID)return null; // Existing Medical Trend deployment stays independent.

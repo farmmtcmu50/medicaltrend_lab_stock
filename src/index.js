@@ -4,7 +4,7 @@ import { analytics, period } from "./analytics.js";
 import QRCode from "qrcode";
 import { stockWorkflow } from "./workflows.js";
 import { subscriptionGate, tenantSetup } from "./subscription.js";
-import { accessEmail } from "../subscription/src/access.js";
+import { accessEmail } from "./access.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const COOKIE_MAX_AGE = 60 * 60 * 12;

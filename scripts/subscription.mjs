@@ -7,7 +7,9 @@ import {randomBytes,createHash,randomUUID} from 'node:crypto';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const cli=join(root,'node_modules/wrangler/bin/wrangler.js');
 const privateDir=join(root,'.provisioning');
-const configPath=join(root,'subscription/wrangler.jsonc');
+// Control plane lives in the medical-trend-subscriptions repository; this file only
+// tells Wrangler which D1 holds the tenant registry and which Worker to bind to.
+const configPath=join(root,'scripts/control-plane.wrangler.json');
 const config=JSON.parse(await readFile(configPath,'utf8'));
 const args=process.argv.slice(2),command=args.shift(),local=args.includes('--local');
 const token=()=>randomBytes(32).toString('hex');
@@ -38,40 +40,6 @@ async function createDatabase(name){
  const result=await wrangler(['d1','create',name,'--location','apac','--config',configPath]);
  const match=result.match(/"database_id"\s*:\s*"([a-f0-9-]{36})"/)||result.match(/database_id\s*=\s*"([a-f0-9-]{36})"/);
  if(match)return match[1];const found=await findDatabase(name);if(!found)throw new Error('สร้างฐานข้อมูลแล้วแต่หา ID ไม่พบ โปรดตรวจ Cloudflare ก่อนรันซ้ำ');return found.uuid;
-}
-async function init(){
- if(!local){
-  await wrangler(['whoami']);
-  let existing=await findDatabase('medical-trend-subscriptions');
-  if(config.d1_databases[0].database_id==='00000000-0000-0000-0000-000000000000'){
-   if(existing)throw new Error('พบฐานข้อมูลส่วนกลางชื่อนี้แล้ว กรุณาตรวจและระบุ database_id ใน subscription/wrangler.jsonc ก่อน เพื่อป้องกันการใช้ฐานผิด');
-   config.d1_databases[0].database_id=await createDatabase('medical-trend-subscriptions');
-   await writeFile(configPath,JSON.stringify(config,null,2)+'\n');
-  }else if(!existing||existing.uuid!==config.d1_databases[0].database_id)throw new Error('ชื่อและ ID ฐานข้อมูลส่วนกลางไม่ตรงกับบัญชี Cloudflare');
- }
- console.log('กำลังสร้าง/อัปเดตตารางส่วนกลาง ('+(local?'local':'remote')+')');
- await wrangler(['d1','migrations','apply','medical-trend-subscriptions','--config',configPath,local?'--local':'--remote']);
- // Sign-in is Cloudflare Access (One-time PIN); there is no setup token or password link any more.
- const owner=(await query("SELECT email FROM admins WHERE id='owner'"))[0];
- let url='http://127.0.0.1:8790';
- if(local){
-  // Never overwrite subscription/.dev.vars: it holds ACCESS_AUD / DEV_ACCESS_EMAIL.
-  const devVars=join(root,'subscription/.dev.vars');
-  let vars;
-  try{vars=await readFile(devVars,'utf8');}
-  catch{vars=(await readFile(join(root,'subscription/.dev.vars.example'),'utf8')).replace(/^DEV_ACCESS_EMAIL=$/m,'DEV_ACCESS_EMAIL='+config.vars.ADMIN_EMAIL);await privateWrite(devVars,vars);console.log('สร้าง subscription/.dev.vars จากตัวอย่างแล้ว');}
-  if(!/^DEV_ACCESS_EMAIL=\S/m.test(vars))console.warn('คำเตือน: subscription/.dev.vars ยังไม่มี DEV_ACCESS_EMAIL จะเข้าระบบบนเครื่องไม่ได้');
- }else{
-  const customDomain=config.routes?.find(route=>route.custom_domain)?.pattern;
-  if(!customDomain)throw new Error('ไม่พบ custom domain ใน subscription/wrangler.jsonc');
-  let secrets=[];try{secrets=parseJSON(await wrangler(['secret','list','--config',configPath]));}catch{}
-  if(!secrets.some(secret=>secret.name==='ACCESS_AUD'))console.warn('คำเตือน: ยังไม่ได้ตั้ง ACCESS_AUD ระบบจะตอบ 500 จนกว่าจะสร้าง Access application และตั้ง secret (ดู docs/cloudflare-access.md)');
-  await wrangler(['deploy','--config',configPath]);
-  url='https://'+customDomain;
- }
- console.log('ระบบส่วนกลาง: '+url);
- console.log('เข้าสู่ระบบผ่าน Cloudflare Access (One-time PIN) ด้วยอีเมล '+(owner?.email||config.vars.ADMIN_EMAIL)+(owner?'':' (บัญชี owner จะถูกสร้างเมื่อเข้าครั้งแรก)'));
- if(local)console.log('เปิดด้วย npm run subscription:dev');
 }
 async function provision(slug){
  if(local)throw new Error('ใช้ integration tests สำหรับลูกค้า local; คำสั่งจัดเตรียมนี้สำหรับ Cloudflare จริง');
@@ -138,7 +106,7 @@ async function backup(slug){
  await audit(tenant.id,'DATABASE_BACKUP');console.log('สำรองข้อมูลไว้ที่ '+backupPath);
 }
 try{
- if(command==='init')await init();else if(command==='provision')await provision(args.find(a=>!a.startsWith('--')));else if(command==='update')await update(args.find(a=>!a.startsWith('--')));
+ if(command==='provision')await provision(args.find(a=>!a.startsWith('--')));else if(command==='update')await update(args.find(a=>!a.startsWith('--')));
  else if(command==='backup')await backup(args.find(a=>!a.startsWith('--')));
- else throw new Error('ใช้ init [--local] | provision <slug> | update <slug> | backup <slug>');
+ else throw new Error('ใช้ provision <slug> | update <slug> | backup <slug> (ติดตั้งระบบส่วนกลางใช้ npm run setup ใน repo medical-trend-subscriptions)');
 }catch(error){console.error(error.message);process.exitCode=1;}

@@ -1,7 +1,7 @@
 import {createRemoteJWKSet,decodeJwt,jwtVerify} from 'jose';
 import {fail} from './security.js';
 
-// Cloudflare Access (One-time PIN) identity, shared by the stock and subscription Workers.
+// Cloudflare Access (One-time PIN) identity. The subscriptions repository keeps its own copy.
 // Every request carries Cf-Access-Jwt-Assertion; the Worker verifies it even though Access sits in front.
 const LOCAL_HOSTS = new Set(['localhost','127.0.0.1','[::1]']);
 const jwksCache = new Map();
