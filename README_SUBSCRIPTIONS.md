@@ -5,7 +5,7 @@
 
 ## โครงสร้าง
 
-- Worker ส่วนกลาง `medical-trend-subscriptions` และ D1 ส่วนกลาง: repo medical-trend-subscriptions
+- Worker ส่วนกลาง `medical-trend-subscriptions` และ D1 ส่วนกลาง: repo mt-subscriptions
 - `src/index.js`: โปรแกรม Stock ชุดเดิม ใช้ร่วมกันโดย deploy Worker แยกลูกค้า
 - ลูกค้าแต่ละราย: Worker `mt-stock-<slug>`, D1 `mt-stock-<slug>`, secrets ของตัวเอง
 - Worker ลูกค้าตรวจสิทธิ์กับส่วนกลางผ่าน Service Binding และ token เฉพาะราย
@@ -16,7 +16,7 @@
 ## ติดตั้งระบบส่วนกลาง
 
 ระบบส่วนกลาง (Worker `medical-trend-subscriptions`, D1 ส่วนกลาง, หน้าผู้ดูแล) แยกไปอยู่ที่ repo
-[medical-trend-subscriptions](https://github.com/farmmtcmu50/medical-trend-subscriptions) แล้ว
+[mt-subscriptions](https://github.com/farmmtcmu50/mt-subscriptions) (Private) แล้ว
 ติดตั้ง/อัปเดต/ทดสอบส่วนกลางจาก repo นั้น (`npm run setup`, `npm test`)
 
 repo นี้เก็บเฉพาะฝั่งลูกค้า: `src/subscription.js` (เรียก `POST /internal/subscription` ผ่าน Service Binding)
@@ -101,7 +101,7 @@ npm run check
 Tests ใช้ workerd/Miniflare จริง ฐาน D1 ของลูกค้า A/B แยกกัน และ stub ของส่วนกลางที่ตอบตามสัญญา
 `/internal/subscription` เดียวกับระบบจริง ทดสอบ tenant isolation, สินค้า/ราคา/หน่วย/backup, expiry และ suspension
 (`npm run test:access` ทดสอบ 401/403/role ของ Access ฝั่ง stock)
-การทดสอบ API ส่วนกลาง, payment และสัญญา `/internal/subscription` อยู่ใน repo medical-trend-subscriptions
+การทดสอบ API ส่วนกลาง, payment และสัญญา `/internal/subscription` อยู่ใน repo mt-subscriptions
 
 ยังไม่รวม payment gateway, ออกใบกำกับภาษี, quota ตามแพ็กเกจ, self-service signup,
 custom domain อัตโนมัติ หรือ automatic provisioning จากหน้าจอ

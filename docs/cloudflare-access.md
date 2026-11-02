@@ -11,7 +11,7 @@
 
 ## โค้ดทำงานอย่างไร
 
-- `src/access.js` (ระบบส่วนกลางมีสำเนาของตัวเองใน repo medical-trend-subscriptions) ตรวจ `Cf-Access-Jwt-Assertion` ทุก request ด้วย `jose`
+- `src/access.js` (ระบบส่วนกลางมีสำเนาของตัวเองใน repo mt-subscriptions) ตรวจ `Cf-Access-Jwt-Assertion` ทุก request ด้วย `jose`
   (JWKS จาก `${ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`, issuer = team domain, audience = `ACCESS_AUD` ของแต่ละ app)
 - ไม่มี JWT / JWT ผิด / หมดอายุ / AUD ของ app อื่น → 401 · อีเมลไม่อยู่ในตารางผู้ใช้หรือถูกปิด → 403
 - stock: หา `users` ด้วย `lower(email)` แล้วใช้ role เดิม · ไม่สร้าง `admin/1111` อีก · `/api/login`, `/api/logout`, `/api/me/password` = 404
@@ -43,7 +43,7 @@ Zero Trust → Access → Applications → Add → Self-hosted (ทำ 2 คร�
 
    ```sh
    npx wrangler secret put ACCESS_AUD
-   npx wrangler secret put ACCESS_AUD   # รันใน repo medical-trend-subscriptions
+   npx wrangler secret put ACCESS_AUD   # รันใน repo mt-subscriptions
    ```
 
 ## ลำดับการเปลี่ยน (rollout)
@@ -57,13 +57,13 @@ Zero Trust → Access → Applications → Add → Self-hosted (ทำ 2 คร�
    และต้องมี admin อย่างน้อยหนึ่งคนที่มีอีเมล
 2. **เปิด Access หน้าประตูก่อน**: สร้าง Access application + policy ตามด้านบน และตั้ง `ACCESS_AUD`
    ช่วงนี้ผู้ใช้ใส่ PIN แล้วยังเจอหน้า password เดิม (โค้ดเก่ายังทำงาน)
-3. **Deploy โค้ดตรวจ JWT**: `npm run deploy` และ `npm run deploy` ใน repo medical-trend-subscriptions
+3. **Deploy โค้ดตรวจ JWT**: `npm run deploy` และ `npm run deploy` ใน repo mt-subscriptions
    (`workers_dev: false` จะปิด URL `*.workers.dev` ของทั้งสอง Worker)
 4. **ทดสอบ**: เข้าแต่ละโดเมน → PIN → ชื่อและ role ถูกต้อง · อีเมลที่ไม่มีในตาราง → 403 · logout แล้วต้องขอ PIN ใหม่
 5. **ถอดรหัสผ่าน**: เมื่อยืนยันแล้ว ล้างข้อมูลรหัสผ่านและ secret เดิมของ Medical Trend เท่านั้น (ห้ามทำผ่าน migration เพราะ Worker ลูกค้าใช้ migration ชุดเดียวกัน)
    - `UPDATE users SET password_hash='ACCESS_ONLY', salt=''` บน `medical-trend-lab-stock`
    - `UPDATE admins SET password_hash='ACCESS_ONLY', salt=''; DELETE FROM sessions; DELETE FROM auth_attempts` บน `medical-trend-subscriptions`
-   - `npx wrangler secret delete SESSION_SECRET` (stock) และ `npx wrangler secret delete SETUP_TOKEN` (ใน repo medical-trend-subscriptions)
+   - `npx wrangler secret delete SESSION_SECRET` (stock) และ `npx wrangler secret delete SETUP_TOKEN` (ใน repo mt-subscriptions)
 
 ย้อนกลับ: deploy commit ก่อนหน้า (รหัสผ่านยังอยู่จนถึงขั้นที่ 5)
 

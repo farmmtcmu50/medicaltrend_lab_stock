@@ -7,7 +7,7 @@ import {randomBytes,createHash,randomUUID} from 'node:crypto';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const cli=join(root,'node_modules/wrangler/bin/wrangler.js');
 const privateDir=join(root,'.provisioning');
-// Control plane lives in the medical-trend-subscriptions repository; this file only
+// Control plane lives in the mt-subscriptions repository; this file only
 // tells Wrangler which D1 holds the tenant registry and which Worker to bind to.
 const configPath=join(root,'scripts/control-plane.wrangler.json');
 const config=JSON.parse(await readFile(configPath,'utf8'));
@@ -108,5 +108,5 @@ async function backup(slug){
 try{
  if(command==='provision')await provision(args.find(a=>!a.startsWith('--')));else if(command==='update')await update(args.find(a=>!a.startsWith('--')));
  else if(command==='backup')await backup(args.find(a=>!a.startsWith('--')));
- else throw new Error('ใช้ provision <slug> | update <slug> | backup <slug> (ติดตั้งระบบส่วนกลางใช้ npm run setup ใน repo medical-trend-subscriptions)');
+ else throw new Error('ใช้ provision <slug> | update <slug> | backup <slug> (ติดตั้งระบบส่วนกลางใช้ npm run setup ใน repo mt-subscriptions)');
 }catch(error){console.error(error.message);process.exitCode=1;}
