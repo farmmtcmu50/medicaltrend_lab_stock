@@ -1,7 +1,7 @@
 import { resolveMachine, machineApi } from './machines.js';
 import { resolveSupplier, supplierApi } from "./suppliers.js";
 import { analytics, period } from "./analytics.js";
-import QRCode from "qrcode";
+import { makeLabelHtml } from "./labels.js";
 import { stockWorkflow } from "./workflows.js";
 import { subscriptionGate, tenantSetup } from "./subscription.js";
 import { accessEmail } from "./access.js";
@@ -644,38 +644,6 @@ async function labelPdf(request, env) {
   if (!labels.length) throw httpError("ไม่มีรายการ QR สำหรับพิมพ์");
   const html = await makeLabelHtml(labels);
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
-}
-
-async function makeLabelHtml(labels) {
-  const cards = [];
-  for (const label of labels) {
-    const svg = await QRCode.toString(label.code, { type: "svg", margin: 0, width: 130, errorCorrectionLevel: "M" });
-    const item = label.item || {};
-    cards.push(`
-      <section class="label">
-        <div class="qr">${svg}<div class="code">${escapeHtml(label.code)}</div></div>
-        <div class="text">
-          ${label.type === "main" ? `<div class="warn">** หน่วยหลัก ระวังการแปะผิด **</div>` : ""}
-          <div class="name">${escapeHtml(item.reagent_name || label.reagent_name || "")}</div>
-          <div>Lot: ${escapeHtml(label.lot || "")}</div>
-          <div>Exp: ${escapeHtml(label.expiry || label.expiry_date || "")}</div>
-          <div>Machine: ${escapeHtml(item.machine || label.machine || "")}</div>
-          ${label.type === "main" ? `<div>จำนวนย่อย: ${Number(label.sub_count || 0)} ${escapeHtml(item.sub_unit || label.sub_unit || "")}</div>` : ""}
-        </div>
-      </section>`);
-  }
-  return `<!doctype html><html><head><meta charset="utf-8"><title>QR Labels</title><style>
-    @page { size: 50mm 25mm; margin: 0; }
-    html,body { margin:0; padding:0; font-family: Arial, sans-serif; color:#000; }
-    .label { box-sizing:border-box; page-break-after:always; width:50mm; height:25mm; padding:1.5mm 1.8mm; display:flex; gap:2mm; align-items:center; overflow:hidden; border:0.2mm solid #000; }
-    .qr { width:19mm; flex:0 0 19mm; text-align:center; }
-    .qr svg { width:17mm; height:17mm; display:block; margin:0 auto; }
-    .code { font-size:5pt; font-weight:700; line-height:1.05; word-break:break-all; }
-    .text { flex:1; min-width:0; font-size:8pt; font-weight:700; line-height:1.2; }
-    .name { font-size:10pt; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .warn { font-size:6pt; font-weight:900; margin-bottom:0.5mm; }
-    @media screen { body { background:#eee; } .label { background:#fff; margin:8px; } }
-  </style></head><body>${cards.join("")}<script>window.onload=()=>setTimeout(()=>window.print(),300)</script></body></html>`;
 }
 
 async function getSettings(env) {
