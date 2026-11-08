@@ -20,22 +20,23 @@
 ติดตั้ง/อัปเดต/ทดสอบส่วนกลางจาก repo นั้น (`npm run setup`, `npm test`)
 
 repo นี้เก็บเฉพาะฝั่งลูกค้า: `src/subscription.js` (เรียก `POST /internal/subscription` ผ่าน Service Binding)
-และ `scripts/subscription.mjs` (provision/update/backup) ซึ่งอ่านทะเบียนลูกค้าจาก D1 ส่วนกลาง
-ตาม `scripts/control-plane.wrangler.json` หากย้ายฐานส่วนกลาง ต้องแก้ database_id ในไฟล์นี้ด้วย
+และ `subscription.app.json` ซึ่งบอกตัวจัดเตรียมพื้นที่ (provisioner) ใน repo mt-subscriptions ว่า Worker ลูกค้าของ Stock
+ต้องใช้ D1 binding, secrets, vars และ health check อะไร คำสั่ง provision/update/backup ย้ายไปอยู่ที่ repo mt-subscriptions
+ซึ่งใช้ร่วมกันทุกโปรแกรม (Stock, LIS, QMS, Shift, Messenger) โดยอ่านโค้ดจากโฟลเดอร์ `../medicaltrend_lab_stock`
 
 ## เปิดลูกค้าใหม่
 
 1. Login ส่วนกลาง แล้วเพิ่มลูกค้า: ชื่อบริษัท อีเมล รหัสลูกค้า แพ็กเกจ และวันทดลอง
 2. ลูกค้าจะอยู่สถานะ “รอจัดเตรียม” ยังไม่สามารถเข้าระบบหรือรับชำระได้
-3. ผู้ดูแล Cloudflare รันจากโฟลเดอร์โปรเจกต์:
+3. ผู้ดูแล Cloudflare รันจากโฟลเดอร์ของ repo **mt-subscriptions** (clone repo นี้ไว้ข้างกันที่ `../medicaltrend_lab_stock`):
 
    ```sh
-   npm run subscription:provision -- chiangmai-lab
+   npm run tenant:provision -- stock chiangmai-lab
    ```
 
 4. คำสั่งสร้าง D1 ใหม่, สร้างตารางจาก migrations, deploy Worker ใหม่, ตั้ง secrets,
    เปิดใช้ Service Binding และตรวจว่า Worker ตอบกลับตามสิทธิ์
-5. เปิดลิงก์ใน `.provisioning/chiangmai-lab-setup.txt` ให้ลูกค้าตั้งรหัสผ่านของ
+5. เปิดลิงก์ใน `mt-subscriptions/.provisioning/stock-chiangmai-lab-setup.txt` ให้ลูกค้าตั้งรหัสผ่านของ
    `admin` เอง การส่งลิงก์ให้ลูกค้าเป็นหน้าที่ของผู้ดูแล ระบบยังไม่ส่งอีเมล
 6. กลับหน้าส่วนกลางและรีเฟรช จะเห็น URL, Database ID และสถานะพร้อมใช้งาน
 
@@ -66,8 +67,9 @@ repo นี้เก็บเฉพาะฝั่งลูกค้า: `src/su
 ## อัปเดตและสำรองลูกค้า
 
 ```sh
-npm run subscription:backup -- chiangmai-lab
-npm run subscription:update -- chiangmai-lab
+# รันใน repo mt-subscriptions
+npm run tenant:backup -- stock chiangmai-lab
+npm run tenant:update -- stock chiangmai-lab
 ```
 
 backup ส่งออก D1 เป็น SQL ลง `.provisioning/` (สิทธิ์ไฟล์ 0600) และบันทึก audit

@@ -12,9 +12,6 @@
     "db:seed:local": "wrangler d1 execute medical-trend-lab-stock --local --file=./seed.sql",
     "db:seed:remote": "wrangler d1 execute medical-trend-lab-stock --remote --file=./seed.sql",
     "check": "wrangler deploy --dry-run",
-    "subscription:provision": "node scripts/subscription.mjs provision",
-    "subscription:update": "node scripts/subscription.mjs update",
-    "subscription:backup": "node scripts/subscription.mjs backup",
     "test:subscription": "node --test tests/subscription.test.mjs",
     "test:access": "node --test tests/access.test.mjs",
     "test": "node --test tests/*.test.mjs"

@@ -25,7 +25,7 @@ A single receipt or adjustment is capped at 2,000 smallest units. A physical cou
 
 Validation: `TMPDIR=/private/tmp node --test tests/*.test.mjs`. Tests cover concurrent retries, unchanged movement counts, case-insensitive scans, partial packages, FEFO, write-off reasons/reports, stale counts, receipt reversal, PR outstanding amounts, role/tenant boundaries, workflow backup/restore and lost-response recovery in the client.
 
-Deploy migration before Worker/assets for the legacy database and each tenant (`node scripts/subscription.mjs update <slug>`). Keep database backups private; never commit provisioning files or credentials.
+Deploy migration before Worker/assets for the legacy database and each tenant (`npm run tenant:update -- stock <slug>` in the mt-subscriptions repository). Keep database backups private; never commit provisioning files or credentials.
 
 ## Dashboard analytics
 

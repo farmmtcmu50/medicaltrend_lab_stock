@@ -27,7 +27,7 @@
 | Path | ใครเรียก | ต้องทำ |
 | --- | --- | --- |
 | `subscriptions…/internal/subscription` | Worker ลูกค้า ผ่าน **Service Binding** `SUBSCRIPTIONS` + Bearer token รายลูกค้า | ไม่ต้อง Bypass — Service Binding ไม่วิ่งผ่านโดเมน/Access โค้ดยกเว้น path นี้จากการตรวจ JWT เอง ส่วนการเรียกจากภายนอกผ่านโดเมนจะถูก Access กันไว้ ซึ่งถูกต้องแล้ว |
-| `scripts/subscription.mjs` | ผู้ดูแลจาก Terminal | ใช้ `wrangler d1 execute` (Cloudflare API) ไม่ผ่านโดเมน ไม่กระทบ · health check ยิง URL ของ Worker ลูกค้า ไม่ใช่ stock/subscriptions |
+| `scripts/tenant.mjs` (repo mt-subscriptions) | ผู้ดูแลจาก Terminal | ใช้ `wrangler d1 execute` (Cloudflare API) ไม่ผ่านโดเมน ไม่กระทบ · health check ยิง URL ของ Worker ลูกค้า ไม่ใช่ stock/subscriptions |
 | Cron / webhook | — | ไม่มีในทั้งสอง Worker |
 
 จึง **ไม่ต้องมี Bypass policy หรือ Service Token** สำหรับสองโดเมนนี้

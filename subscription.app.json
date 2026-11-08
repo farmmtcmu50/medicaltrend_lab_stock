@@ -1,0 +1,10 @@
+{
+  "config": "wrangler.jsonc",
+  "db_binding": "DB",
+  "secrets": ["SESSION_SECRET", "TENANT_SETUP_TOKEN"],
+  "vars": { "SESSION_COOKIE": "mt_stock_{slug_}" },
+  "assets": { "run_worker_first": true },
+  "health": { "path": "/api/me", "status": 401 },
+  "setup_url": "/setup.html#token={TENANT_SETUP_TOKEN}",
+  "protected_database_ids": ["ce9f4e96-cd21-4190-8639-5026c3ea80ba"]
+}

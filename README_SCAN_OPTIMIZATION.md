@@ -6,6 +6,6 @@ Migration 0005 mirrors the six production indexes installed on 17 October 2026, 
 
 Validation: `TMPDIR=/private/tmp node --test tests/*.test.mjs` (12 cases), including partial packages, child QR removal, case-insensitive QR lookup, FEFO refusal/override and deferred UI refresh. A local D1 database with 10,000 historical rows verifies SEARCH using idx_su_barcode_lower instead of SCAN. Local Miniflare reports zero rows_read, so no production reduction percentage is claimed.
 
-Deploy migration before the Worker/assets for each stock database. Existing open browser tabs should reload after deployment. Legacy: apply migrations with wrangler.jsonc, then deploy. Subscription tenants: `node scripts/subscription.mjs update <slug>` applies migrations and deploys to the isolated tenant. The central subscription Worker does not need updating.
+Deploy migration before the Worker/assets for each stock database. Existing open browser tabs should reload after deployment. Legacy: apply migrations with wrangler.jsonc, then deploy. Subscription tenants: `npm run tenant:update -- stock <slug>` (run in the mt-subscriptions repository) applies migrations and deploys to the isolated tenant. The central subscription Worker does not need updating.
 
 Production verification should compare D1 metrics before/after during normal scans; do not consume real inventory just to benchmark.
