@@ -185,3 +185,13 @@ test('loading the item menu renders column checkboxes and applies saved visibili
  assert.match(vm.runInContext("$('#itemColumns').innerHTML",context),/data-item-column="machine"/);
  assert.deepEqual(JSON.parse(JSON.stringify(context.visibility)),[['reagent_name',false],['machine',true]]);
 });
+
+test('XLSX UI previews without committing and only enables confirmation for valid files',async()=>{
+ const {context}=await workflowContext();context.sent=[];
+ vm.runInContext(`$('#importItemsDialog').showModal=()=>{state.importOpened=true;};renderTable=()=>{};fetch=async(path,options)=>{sent.push(path);return {ok:true,json:async()=>({ok:true,valid:true,import_id:'preview-id',rows:[{excel_row:2,data:{reagent_name:'A'},errors:[]}]})};};`,context);
+ await vm.runInContext("previewItemsFile({target:{files:[{name:'products.xlsx',size:100}],value:'products.xlsx'}})",context);
+ assert.deepEqual(context.sent,['/api/items/import/preview']);assert.equal(vm.runInContext("$('#confirmImportItemsBtn').disabled",context),false);assert.equal(vm.runInContext('state.itemImportId',context),'preview-id');
+ vm.runInContext("fetch=async()=>({ok:true,json:async()=>({ok:true,valid:false,import_id:null,rows:[{excel_row:2,data:{},errors:['Invalid Supplier']}]})})",context);
+ await vm.runInContext("previewItemsFile({target:{files:[{name:'bad.xlsx',size:100}],value:''}})",context);
+ assert.equal(vm.runInContext("$('#confirmImportItemsBtn').disabled",context),true);assert.equal(vm.runInContext('state.itemImportId',context),null);
+});

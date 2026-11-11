@@ -453,3 +453,36 @@ test('machine registry canonicalizes item selection, rejects typos, and propagat
  assert.equal((await call('/api/restore',backup.data)).status,200);
  assert.equal((await aDb.prepare('SELECT name FROM machines WHERE machine_id=?').bind(id).first()).name,'Analyzer Renamed');
 });
+
+test('XLSX import previews without writes and commits validated products atomically with replay protection',async()=>{
+ const {default:ExcelJS}=await import('exceljs/dist/exceljs.min.js');
+ const cookie=await wfAuth(),origin='https://tenant-a.example';
+ const template=await mf.dispatchFetch(origin+'/api/items/template',{headers:{cookie}});assert.equal(template.status,200);assert.match(template.headers.get('content-type'),/spreadsheetml/);
+ const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(new Uint8Array(await template.arrayBuffer()));
+ const secondTemplate=await mf.dispatchFetch(origin+'/api/items/template',{headers:{cookie}});assert.equal(secondTemplate.status,200);assert.ok((await secondTemplate.arrayBuffer()).byteLength>1000);
+ await tenantRequest('tenant-a','/api/suppliers',{method:'POST',cookie,body:{name:'Import supplier'}});
+ const sheet=workbook.getWorksheet('สินค้า');sheet.getRow(2).values=['Import test product A','Manual','Import supplier','กล่อง',1,'ชิ้น',10,7,20,500];sheet.getRow(3).values=['Import test product B','Manual','Import supplier','ขวด',0,'','',0,1,30];
+ const upload=async()=>{const response=await mf.dispatchFetch(origin+'/api/items/import/preview',{method:'POST',headers:{cookie,origin,'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:await workbook.xlsx.writeBuffer()});const output=await response.text();assert.ok(output.startsWith('{'),output.slice(0,1800));return {status:response.status,data:JSON.parse(output)};};
+ let preview=await upload();assert.equal(preview.status,200,JSON.stringify(preview.data));assert.equal(preview.data.valid,true);assert.equal(preview.data.rows.length,2);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM items WHERE reagent_name LIKE 'Import test product%'").first()).n,0);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/items/import/commit',{method:'POST',cookie:staff,body:{import_id:preview.data.import_id}})).status,404);
+ const send=()=>tenantRequest('tenant-a','/api/items/import/commit',{method:'POST',cookie,body:{import_id:preview.data.import_id}});
+ const committed=await send();assert.equal(committed.status,200,JSON.stringify(committed.data));assert.equal(committed.data.count,2);assert.deepEqual((await send()).data,committed.data);
+ const first=await aDb.prepare('SELECT * FROM items WHERE item_id=?').bind(committed.data.item_ids[0]).first();assert.equal(first.unit_price,50);assert.equal(first.sub_per_main,10);
+ const second=await aDb.prepare('SELECT * FROM items WHERE item_id=?').bind(committed.data.item_ids[1]).first();assert.equal(second.sub_unit,'ขวด');assert.equal(second.sub_per_main,1);
+ assert.equal((await aDb.prepare('SELECT COUNT(*) n FROM stock_units WHERE item_id=?').bind(first.item_id).first()).n,0);
+ const originalPreview=preview;
+ sheet.getCell('A2').value='Import atomic A';sheet.getCell('A3').value='Import atomic B';
+ const atomic=await upload();assert.equal(atomic.data.valid,true);
+ const stored=await aDb.prepare('SELECT rows_json FROM item_imports WHERE import_id=?').bind(atomic.data.import_id).first();const staged=JSON.parse(stored.rows_json);staged.ids[1]=first.item_id;
+ await aDb.prepare('UPDATE item_imports SET rows_json=? WHERE import_id=?').bind(JSON.stringify(staged),atomic.data.import_id).run();
+ const rolledBack=await tenantRequest('tenant-a','/api/items/import/commit',{method:'POST',cookie,body:{import_id:atomic.data.import_id}});assert.equal(rolledBack.status,409);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM items WHERE reagent_name LIKE 'Import atomic%'").first()).n,0);
+ sheet.getCell('A2').value='Import expired A';sheet.getCell('A3').value='Import expired B';const expired=await upload();assert.equal(expired.data.valid,true);
+ await aDb.prepare("UPDATE item_imports SET expires_at='2000-01-01' WHERE import_id=?").bind(expired.data.import_id).run();assert.equal((await tenantRequest('tenant-a','/api/items/import/commit',{method:'POST',cookie,body:{import_id:expired.data.import_id}})).status,409);
+ sheet.getCell('A2').value='Import test product A';sheet.getCell('A3').value='Import test product B';preview=originalPreview;
+
+ preview=await upload();assert.equal(preview.data.valid,false);assert.equal(preview.data.import_id,null);assert.match(preview.data.rows[0].errors.join(' '),/ซ้ำ/);
+ sheet.getCell('A2').value='Import invalid product';sheet.getCell('C2').value='Missing Supplier';sheet.getRow(3).values=[];preview=await upload();assert.equal(preview.data.valid,false);assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM items WHERE reagent_name='Import invalid product'").first()).n,0);
+});

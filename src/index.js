@@ -1,3 +1,4 @@
+import { itemTemplate, previewItemImport, commitItemImport } from './item-import.js';
 import { resolveMachine, machineApi } from './machines.js';
 import { resolveSupplier, supplierApi } from "./suppliers.js";
 import { analytics, period } from "./analytics.js";
@@ -89,6 +90,9 @@ async function api(request, env) {
   if (method === "GET" && path === "/dashboard") return dashboard(request, env, user);
   if (path === '/machines' || path.startsWith('/machines/')) return json(await machineApi(request,env,user,{readBody}));
   if (path === '/suppliers' || path.startsWith('/suppliers/')) return json(await supplierApi(request,env,user,{readBody,logAudit}));
+  if(method==='GET'&&path==='/items/template')return itemTemplate(env,user);
+  if(method==='POST'&&path==='/items/import/preview')return json(await previewItemImport(request,env,user));
+  if(method==='POST'&&path==='/items/import/commit')return json(await commitItemImport(request,env,user));
   if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
   if (method === "PUT" && path.startsWith("/items/") && path.endsWith("/active")) return setItemActive(request, env, user, path.split("/")[2]);

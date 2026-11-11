@@ -97,6 +97,10 @@ function bindUi() {
       }
     });
   });
+  $('#importItemsBtn').addEventListener('click',()=>$('#importItemsFile').click());
+  $('#importItemsFile').addEventListener('change',previewItemsFile);
+  $('#cancelImportItemsBtn').addEventListener('click',()=>$('#importItemsDialog').close());
+  $('#confirmImportItemsBtn').addEventListener('click',confirmItemsImport);
   $("#itemSearchBtn").addEventListener("click", refreshItems);
   $("#itemSearch").addEventListener("keydown", enter(refreshItems));
   $("#itemMachineFilter").addEventListener("change", refreshItems);
@@ -381,6 +385,31 @@ function saveDashboardColumnPreference(visible) {
 function applyDashboardColumnVisibility() {
   const visible = new Set($$("input:checked", $("#dashboardColumns")).map((box) => box.dataset.col));
   $$("[data-key]", $("#dashboardTable")).forEach((cell) => cell.classList.toggle("hidden", cell.dataset.key!=='dispose_action'&&!visible.has(cell.dataset.key)));
+}
+
+async function previewItemsFile(event){
+ const file=event.target.files?.[0];if(!file)return;
+ const button=$('#importItemsBtn'),status=$('#importItemsStatus');button.disabled=true;status.textContent='กำลังตรวจไฟล์…';state.itemImportId=null;
+ try{
+  if(!/\.xlsx$/i.test(file.name)||file.size>2*1024*1024)throw new Error('เลือกไฟล์ .xlsx ขนาดไม่เกิน 2 MB');
+  const response=await fetch('/api/items/import/preview',{method:'POST',headers:{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:file});
+  const result=await response.json();if(!response.ok||result.ok===false)throw new Error(result.error||'ตรวจไฟล์ไม่สำเร็จ');
+  state.itemImportId=result.import_id;
+  const invalid=result.rows.filter(row=>row.errors.length).length;
+  $('#importItemsSummary').textContent=`ทั้งหมด ${result.rows.length} รายการ · ผ่าน ${result.rows.length-invalid} · ต้องแก้ไข ${invalid}`;
+  const columns=[['excel_row','แถว Excel'],['reagent_name','ชื่อสินค้า'],['machine','เครื่อง'],['supplier','Supplier'],['main_unit','หน่วยหลัก'],['has_sub_unit','ใช้หน่วยย่อย'],['sub_unit','หน่วยย่อย'],['sub_per_main','ย่อย/หลัก'],['lead_time_days','Lead Time'],['reorder_point_sub','Safety Stock'],...(canViewPrices()?[['main_unit_price','ต้นทุนต่อหลัก']]:[]),['errors','ผลตรวจสอบ']];
+  renderTable($('#importItemsTable'),columns,result.rows.map(row=>({...row.data,excel_row:row.excel_row,errors:row.errors.join(' / ')||'ผ่าน'})),{main_unit_price:money,has_sub_unit:value=>value?'มี':'ไม่มี'});
+  $('#confirmImportItemsBtn').disabled=!result.valid;$('#importItemsError').textContent=result.valid?'':'ยังบันทึกไม่ได้ กรุณาแก้แถวที่ผิดแล้วอัปโหลดใหม่';$('#importItemsDialog').showModal();status.textContent='';
+ }catch(error){status.textContent=error.message;toast(error.message,true);}finally{button.disabled=false;event.target.value='';}
+}
+async function confirmItemsImport(){
+ const button=$('#confirmImportItemsBtn');if(button.disabled||!state.itemImportId)return;button.disabled=true;$('#cancelImportItemsBtn').disabled=true;
+ try{
+  const result=await api('/api/items/import/commit',{method:'POST',body:{import_id:state.itemImportId}});
+  $('#importItemsDialog').close();state.itemImportId=null;toast(`นำเข้าสินค้า ${result.count} รายการแล้ว`);
+  await Promise.all([refreshItems(),refreshDashboard(),refreshPrSuggestions(),refreshSuppliers()]);
+ }catch(error){$('#importItemsError').textContent=error.message+' · กดยืนยันเพื่อลองอีกครั้งได้';}
+ finally{button.disabled=!state.itemImportId;$('#cancelImportItemsBtn').disabled=false;}
 }
 
 function filterItemMenuRows(items,query='',machine=''){
