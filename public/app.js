@@ -1096,7 +1096,7 @@ function printPrDocument(meta, rowsData) {
       <div><strong>อนุมัติโดย:</strong> ${esc(meta.approved_by || "")}</div>
       <div><strong>อนุมัติเมื่อ:</strong> ${esc(formatDateTime(meta.approved_at || ""))}</div>
     </section>
-    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock</th><th>จำนวน</th><th>หน่วย</th>${priceHeaders}<th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock ณ วันขอซื้อ</th><th>จำนวนขอซื้อ</th><th>หน่วย</th>${priceHeaders}<th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
     ${totalBlock}
     <section class="signatures"><div class="sign">ผู้สั่งซื้อ / ผู้ขอซื้อ</div><div class="sign">ผู้บริหาร / ผู้อนุมัติ</div></section>
     </body></html>`);
