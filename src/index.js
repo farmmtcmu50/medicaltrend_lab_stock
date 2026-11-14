@@ -646,7 +646,8 @@ async function labelPdf(request, env) {
   const body = await readBody(request);
   const labels = Array.isArray(body.labels) ? body.labels : [];
   if (!labels.length) throw httpError("ไม่มีรายการ QR สำหรับพิมพ์");
-  const html = await makeLabelHtml(labels);
+  if (body.size && !["50x20", "50x25", "50x30"].includes(body.size)) throw httpError("ขนาดสติกเกอร์ไม่ถูกต้อง");
+  const html = await makeLabelHtml(labels, { size: body.size });
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 

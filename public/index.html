@@ -71,6 +71,7 @@
           <h1><span class="lab-name">Medical Trend</span> Lab Operations</h1>
           </div>
         </div>
+        <label>ขนาดสติกเกอร์ (ใช้กับทุกจุดพิมพ์)<select id="labelSize"><option value="50x25">5 × 2.5 ซม. (เดิม)</option><option value="50x20">5 × 2 ซม.</option><option value="50x30">5 × 3 ซม.</option></select></label>
         <div class="workbar-card">
           <span>Workspace</span>
           <strong>stock.medicaltrend.stream</strong>
@@ -320,13 +321,13 @@
         <header class="page-head"><div><h2>ตั้งค่า</h2><p class="muted">Backup, Restore, Users, Audit และข้อมูลระบบ</p></div></header>
         <div class="settings-grid">
           <section class="panel stack">
-            <h3>Branding</h3>
+            <h3>Branding / การพิมพ์</h3>
             <form id="brandingForm" class="grid-form">
               <label>ชื่อแล็บ<input name="lab_name" maxlength="120" required></label>
-              <label>Logo 1:1<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"></label>
+              <label>โลโก้องค์กร<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"></label>
               <div class="brand-preview span-2">
                 <img id="brandingPreview" src="/logo-medical-trend.png" alt="Logo preview">
-                <p class="muted">รองรับ PNG/JPG/WebP สัดส่วน 1:1 และขนาดไม่เกินประมาณ 500 KB</p>
+                <p class="muted">รองรับ PNG/JPG/WebP ทุกสัดส่วน ขนาดไม่เกิน 500 KB โลโก้จะแสดงด้านบนของโปรแกรมหลังบันทึก</p>
               </div>
               <button class="primary span-2">บันทึก Logo / ชื่อแล็บ</button>
             </form>

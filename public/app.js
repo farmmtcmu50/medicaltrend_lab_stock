@@ -158,7 +158,10 @@ function bindUi() {
   $("#consumeForm").barcode.addEventListener("input", scheduleConsumeScan);
 
   $("#expiringForm").addEventListener("submit", saveExpiring);
-  $("#brandingForm").addEventListener("submit", saveBranding);
+  $("#labelSize").value = localStorage.getItem("stock-label-size") || "50x25";
+  if (!$("#labelSize").value) $("#labelSize").value = "50x25";
+  $("#labelSize").addEventListener("change", e => localStorage.setItem("stock-label-size", e.target.value));
+  $("#brandingForm").addEventListener("submit", (e) => saveBranding(e).catch(error => toast(error.message, true)));
   $("#brandingForm").logo.addEventListener("change", previewBrandingLogo);
   $("#changePasswordForm").addEventListener("submit", changeOwnPassword);
   $("#restoreForm").addEventListener("submit", restoreBackup);
@@ -531,7 +534,7 @@ async function openReceiveDialog(itemId) {
   $("#receiveDialogTitle").textContent = `รับเข้า: ${item.reagent_name}`;
   $("#receiveDialogMeta").textContent = `${item.machine || "-"} | ${item.main_unit || "-"} / ${item.sub_unit || "-"} | Supplier: ${item.supplier || "-"}`;
   const enabled = Number(item.has_sub_unit ?? 1) === 1;
-  form.unit_mode.innerHTML = enabled ? `<option value="sub">${esc(item.sub_unit)}</option><option value="main">${esc(item.main_unit)}</option>` : `<option value="main">${esc(item.main_unit)}</option>`;
+  form.unit_mode.innerHTML = enabled ? `<option value="sub">🧪 หน่วยย่อย · ${esc(item.sub_unit)}</option><option value="main">📦 หน่วยหลัก · ${esc(item.main_unit)}</option>` : `<option value="main">📦 หน่วยหลัก · ${esc(item.main_unit)}</option>`;
   form.sticker_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option>' : '<option value="sub">หน่วยหลักแยกดวง</option>';
   await refreshLotOptions();
   await refreshReceiptLines(itemId);
@@ -842,8 +845,7 @@ function manualPrRowData(itemId, item) {
 function renderPurchaseRequisition() {
   $("#splitPrBtn")?.classList.toggle("hidden",Boolean(state.editingPrId));
   const columns = [
-    ["name", "ชื่อสินค้า"], ["supplier", "Supplier"], ["current_stock", "Stock ปัจจุบัน"], ["lot", "Lot"],
-    ["expiry", "Expire"], ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["unit_price", "ราคาประมาณ"],
+    ["name", "ชื่อสินค้า"], ["supplier", "Supplier"], ["current_stock", "Stock ปัจจุบัน"], ["order_qty", "จำนวนสั่ง"], ["unit", "หน่วย"], ["unit_price", "ราคาประมาณ"],
     ["total", "รวม"], ["reason", "เหตุผล"], ["actions", "ลบ"],
   ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
   renderTable($("#prTable"), columns, state.prRows.map((row) => ({
@@ -1061,8 +1063,6 @@ function printPrDocument(meta, rowsData) {
       <td>${esc(row.name)}</td>
       <td>${esc(row.supplier)}</td>
       <td>${esc(row.current_stock)}</td>
-      <td>${esc(row.lot)}</td>
-      <td>${esc(row.expiry)}</td>
       <td>${esc(row.order_qty)}</td>
       <td>${esc(row.unit)}</td>
       ${showPrices ? `<td>${money(row.unit_price)}</td><td>${money(Number(row.order_qty || 0) * Number(row.unit_price || 0))}</td>` : ""}
@@ -1096,7 +1096,7 @@ function printPrDocument(meta, rowsData) {
       <div><strong>อนุมัติโดย:</strong> ${esc(meta.approved_by || "")}</div>
       <div><strong>อนุมัติเมื่อ:</strong> ${esc(formatDateTime(meta.approved_at || ""))}</div>
     </section>
-    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock</th><th>Lot</th><th>Exp</th><th>จำนวน</th><th>หน่วย</th>${priceHeaders}<th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>รายการ</th><th>Supplier</th><th>Stock</th><th>จำนวน</th><th>หน่วย</th>${priceHeaders}<th>เหตุผล</th></tr></thead><tbody>${rows}</tbody></table>
     ${totalBlock}
     <section class="signatures"><div class="sign">ผู้สั่งซื้อ / ผู้ขอซื้อ</div><div class="sign">ผู้บริหาร / ผู้อนุมัติ</div></section>
     </body></html>`);
@@ -1316,7 +1316,7 @@ function stockRowToLabel(row) {
 }
 
 async function printLabels(labels) {
-  const html = await apiText("/api/labels", { method: "POST", body: { labels } });
+  const html = await apiText("/api/labels", { method: "POST", body: { labels, size: $("#labelSize").value } });
   const win = window.open("", "_blank");
   win.document.open();
   win.document.write(html);
@@ -1442,7 +1442,7 @@ async function readLogoFile(file) {
   if (file.size > 500 * 1024) throw new Error("ไฟล์โลโก้ใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกิน 500 KB");
   const dataUrl = await fileToDataUrl(file);
   const size = await imageSize(dataUrl);
-  if (size.width !== size.height) throw new Error("โลโก้ต้องเป็นสัดส่วน 1:1 เช่น 512x512 px");
+  if (!size.width || !size.height) throw new Error("ไฟล์รูปไม่ถูกต้อง");
   return dataUrl;
 }
 

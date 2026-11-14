@@ -195,3 +195,18 @@ test('XLSX UI previews without committing and only enables confirmation for vali
  await vm.runInContext("previewItemsFile({target:{files:[{name:'bad.xlsx',size:100}],value:''}})",context);
  assert.equal(vm.runInContext("$('#confirmImportItemsBtn').disabled",context),true);assert.equal(vm.runInContext('state.itemImportId',context),null);
 });
+
+test('PR draft and printed document omit lot and expiry columns',async()=>{
+ const {context}=await workflowContext();context.columns=[];context.printed='';
+ vm.runInContext(`renderPrSuggestions=()=>{};renderTable=(el,cols)=>{columns=cols.map(c=>c[0]);};state.prRows=[{name:'Item',lot:'SECRETLOT',expiry:'2030-12-31',order_qty:1}];renderPurchaseRequisition();window.open=()=>({document:{open(){},write(html){printed=html},close(){}}});printPrDocument({},state.prRows);`,context);
+ assert.ok(!context.columns.includes('lot'));assert.ok(!context.columns.includes('expiry'));
+ assert.doesNotMatch(context.printed,/<th>Lot<|<th>Exp<|SECRETLOT|2030-12-31/);
+});
+test('branding accepts a valid landscape logo and updates every app logo',async()=>{
+ const {context}=await workflowContext();context.logos=[{},{}];
+ vm.runInContext(`fileToDataUrl=async()=> 'data:image/png;base64,YQ==';imageSize=async()=>({width:800,height:200});`,context);
+ assert.equal(await vm.runInContext("readLogoFile({type:'image/png',size:100})",context),'data:image/png;base64,YQ==');
+ await assert.rejects(vm.runInContext("readLogoFile({type:'image/png',size:600000})",context),/500 KB/);
+ vm.runInContext(`document.querySelectorAll=s=>s==='.brand-logo'?logos:[];state.branding={lab_name:'Customer',logo_data_url:'data:image/png;base64,YQ=='};applyBranding();`,context);
+ assert.ok(context.logos.every(img=>img.src==='data:image/png;base64,YQ=='));
+});

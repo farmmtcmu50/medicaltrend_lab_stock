@@ -224,6 +224,7 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 }
 .workbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
