@@ -890,10 +890,10 @@ async function refreshPurchaseRequisitions() {
   state.prRequests = res.rows || [];
   const columns = [
     ["pr_no", "เลขที่ PR"], ["status", "สถานะ"], ["request_date", "วันที่ขอซื้อ"], ["requester", "ผู้ขอซื้อ"],
-    ["department", "แผนก"], ["requested_by", "ส่งโดย"], ["approved_by", "อนุมัติโดย"], ["approved_at", "อนุมัติเมื่อ"],
+    ["suppliers", "Supplier"],
     ["total_value", "มูลค่า"], ["actions", "จัดการ"],
   ].filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
-  renderTable($("#prRequestsTable"), columns, state.prRequests.map((row) => ({ ...row, actions: row.pr_id })), {
+  renderTable($("#prRequestsTable"), columns, state.prRequests.map((row) => ({ ...row, suppliers: [...new Set((row.items || []).map(item => String(item.supplier || "").trim() || "ยังไม่ระบุ Supplier"))].join(", ") || "ยังไม่ระบุ Supplier", actions: row.pr_id })), {
     status: (v) => `<span class="badge ${esc(v)}">${esc(v)}</span>`,
     total_value: money,
     actions: (_, row) => prRequestActions(row),

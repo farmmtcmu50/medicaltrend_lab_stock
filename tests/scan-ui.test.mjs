@@ -210,3 +210,13 @@ test('branding accepts a valid landscape logo and updates every app logo',async(
  vm.runInContext(`document.querySelectorAll=s=>s==='.brand-logo'?logos:[];state.branding={lab_name:'Customer',logo_data_url:'data:image/png;base64,YQ=='};applyBranding();`,context);
  assert.ok(context.logos.every(img=>img.src==='data:image/png;base64,YQ=='));
 });
+
+test('PR list shows distinct suppliers and omits unused metadata columns',async()=>{
+ const {context}=await workflowContext();context.rendered={};
+ vm.runInContext(`api=async()=>({rows:[{pr_id:'one',items:[{supplier:'Vendor A'},{supplier:'Vendor A'},{supplier:'Vendor B'}]},{pr_id:'two',items:[{supplier:''}]}]});renderTable=(el,columns,rows)=>{rendered={columns:columns.map(c=>c[0]),rows};};`,context);
+ await vm.runInContext('refreshPurchaseRequisitions()',context);
+ assert.ok(context.rendered.columns.includes('suppliers'));
+ for(const key of ['department','requested_by','approved_by','approved_at'])assert.ok(!context.rendered.columns.includes(key));
+ assert.equal(context.rendered.rows[0].suppliers,'Vendor A, Vendor B');
+ assert.equal(context.rendered.rows[1].suppliers,'ยังไม่ระบุ Supplier');
+});
