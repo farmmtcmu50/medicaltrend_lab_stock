@@ -529,13 +529,13 @@ async function openReceiveDialog(itemId) {
   form.reset();
   form.item_id.value = item.item_id;
   form.quantity.value = 1;
-  form.unit_mode.value = "sub";
-  form.sticker_mode.value = "sub";
   $("#receiveDialogTitle").textContent = `รับเข้า: ${item.reagent_name}`;
   $("#receiveDialogMeta").textContent = `${item.machine || "-"} | ${item.main_unit || "-"} / ${item.sub_unit || "-"} | Supplier: ${item.supplier || "-"}`;
   const enabled = Number(item.has_sub_unit ?? 1) === 1;
   form.unit_mode.innerHTML = enabled ? `<option value="sub">🧪 หน่วยย่อย · ${esc(item.sub_unit)}</option><option value="main">📦 หน่วยหลัก · ${esc(item.main_unit)}</option>` : `<option value="main">📦 หน่วยหลัก · ${esc(item.main_unit)}</option>`;
-  form.sticker_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option>' : '<option value="sub">หน่วยหลักแยกดวง</option>';
+  form.sticker_mode.innerHTML = enabled ? '<option value="sub">หน่วยย่อยหลายดวง</option><option value="main">หน่วยหลัก 1 ดวง</option>' : '<option value="sub">หน่วยหลัก 1 ดวงต่อหน่วย</option>';
+  form.unit_mode.value = "main";
+  form.sticker_mode.value = enabled ? "main" : "sub";
   await refreshLotOptions();
   await refreshReceiptLines(itemId);
   $("#receiveDialog").showModal();
