@@ -1,3 +1,4 @@
+import { DASHBOARD_DEFAULTS, dashboardPermissions, dashboardProjection } from './dashboard-permissions.js';
 import { itemTemplate, previewItemImport, commitItemImport } from './item-import.js';
 import { resolveMachine, machineApi } from './machines.js';
 import { resolveSupplier, supplierApi } from "./suppliers.js";
@@ -52,6 +53,21 @@ async function api(request, env) {
   if (env.TENANT_ID && method === "POST" && path === "/logout") return logout(env, request);
 
   const user = await requireUser(request, env);
+  if(path==='/settings/dashboard-permissions'){
+    await requireAdmin(user);
+    if(method==='GET')return json({ok:true,role:'staff',permissions:await loadDashboardPermissions(env,'staff')});
+    if(method==='PUT'){
+      const body=await readBody(request);
+      if(body.role!=='staff'||!body.permissions||Object.keys(body.permissions).length!==Object.keys(DASHBOARD_DEFAULTS).length||Object.keys(DASHBOARD_DEFAULTS).some(k=>typeof body.permissions[k]!=='boolean')||Object.keys(body.permissions).some(k=>!(k in DASHBOARD_DEFAULTS)))throw httpError('ข้อมูลสิทธิ์ Dashboard ไม่ถูกต้อง');
+      const before=await loadDashboardPermissions(env,'staff');
+      await env.DB.batch([
+        env.DB.prepare("INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES('dashboard_permissions:staff',?,?)").bind(JSON.stringify(body.permissions),now()),
+        env.DB.prepare("INSERT INTO audit_logs(audit_id,timestamp,username,action,target_type,target_id,result,details) VALUES(?,?,?,'UPDATE_DASHBOARD_PERMISSIONS','role','staff','SUCCESS',?)").bind(nextId('AUD'),now(),user.username,JSON.stringify({before,after:body.permissions}))
+      ]);
+      return json({ok:true,permissions:body.permissions});
+    }
+    throw httpError('Method not allowed',405);
+  }
   const flow = workflows(env,user);
   if (method === "GET" && path === "/operations/status") return json(await flow.status(request));
   if (method === "GET" && /^\/operations\/[^/]+\/units$/.test(path)) return json(await flow.details(path.split('/')[2]));
@@ -176,7 +192,13 @@ async function logout(env, request) {
   return json({ ok: true }, 200, { "set-cookie": `${env.SESSION_COOKIE || "mt_stock_session"}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}` });
 }
 
+async function loadDashboardPermissions(env,role){
+ let saved={};try{saved=JSON.parse(await settingValue(env,'dashboard_permissions:staff','{}'));}catch{}
+ return dashboardPermissions(role,saved);
+}
 async function dashboard(request, env, user, includeAnalytics=true) {
+  const permissions=includeAnalytics?await loadDashboardPermissions(env,user.role):null;
+  const showPrices=includeAnalytics?permissions.finance:canViewPrices(user);
   const url = new URL(request.url);
   const q = `%${(url.searchParams.get("q") || "").trim().toLowerCase()}%`;
   const machine = (url.searchParams.get("machine") || "").trim().toLowerCase();
@@ -221,15 +243,16 @@ async function dashboard(request, env, user, includeAnalytics=true) {
     };
   });
   const totalValue = round(data.reduce((sum, row) => sum + row.stock_value, 0));
-  return json({
+  const payload = {
     ok: true,
-    rows: canViewPrices(user) ? data : data.map(stripPriceFields),
+    rows: showPrices ? data : data.map(stripPriceFields),
     machines,
-    analytics: includeAnalytics ? await analytics(env,url.searchParams,data,canViewPrices(user)) : null,
+    analytics: includeAnalytics ? await analytics(env,url.searchParams,data,showPrices) : null,
     expiring_days: expiringDays,
-    total_value: canViewPrices(user) ? totalValue : null,
-    can_view_prices: canViewPrices(user),
-  });
+    total_value: showPrices ? totalValue : null,
+    can_view_prices: showPrices,
+  };
+  return json(includeAnalytics?dashboardProjection(payload,permissions):payload);
 }
 
 const ITEM_COLUMN_KEYS=['active_label','reagent_name','machine','main_unit','sub_unit','sub_per_main','stock_quantity','supplier','lead_time_days','reorder_point_sub','main_unit_price','actions'];

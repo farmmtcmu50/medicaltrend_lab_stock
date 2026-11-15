@@ -161,6 +161,10 @@ function bindUi() {
   $("#labelSize").value = localStorage.getItem("stock-label-size") || "50x25";
   if (!$("#labelSize").value) $("#labelSize").value = "50x25";
   $("#labelSize").addEventListener("change", e => localStorage.setItem("stock-label-size", e.target.value));
+  $('#dashboardPermissionsForm').addEventListener('submit',async e=>{
+    e.preventDefault();const form=e.target,button=form.querySelector('button');button.disabled=true;
+    try{const permissions=Object.fromEntries(['stock','near','delivery','finance'].map(key=>[key,form.elements.namedItem(key).checked]));await api('/api/settings/dashboard-permissions',{method:'PUT',body:{role:'staff',permissions}});$('#dashboardPermissionsStatus').textContent='บันทึกแล้ว มีผลกับ staff เมื่อโหลด Dashboard ครั้งถัดไป';toast('บันทึกสิทธิ์ Dashboard แล้ว');}catch(error){toast(error.message,true);}finally{button.disabled=false;}
+  });
   $("#brandingForm").addEventListener("submit", (e) => saveBranding(e).catch(error => toast(error.message, true)));
   $("#brandingForm").logo.addEventListener("change", previewBrandingLogo);
   $("#changePasswordForm").addEventListener("submit", changeOwnPassword);
@@ -268,6 +272,10 @@ async function refreshSettings() {
   applyBranding();
   $("#brandingForm").lab_name.value = state.branding.lab_name;
   $("#brandingPreview").src = state.branding.logo_data_url;
+  if(state.user?.role==='admin'){
+    const access=await api('/api/settings/dashboard-permissions');
+    for(const key of ['stock','near','delivery','finance'])$('#dashboardPermissionsForm').elements.namedItem(key).checked=access.permissions[key];
+  }
   $("#expiringForm").value.value = res.expiring_days;
   $("#systemInfo").innerHTML = Object.entries({
     Platform: "Cloudflare Workers + D1",
@@ -292,6 +300,8 @@ async function refreshDashboard() {
   const machine = encodeURIComponent(selectedMachine);
   const dates=new URLSearchParams({period:$('#dashboardPeriod').value,start:$('#dashboardStart').value,end:$('#dashboardEnd').value});
   const res = await api(`/api/dashboard?q=${q}&machine=${machine}&${dates}`);
+  for(const id of ["dashboardStockDialog","analyticsDetailsDialog"])if($("#"+id).open)$("#"+id).close();
+  state.dashboardPermissions=res.permissions;
   state.analytics=res.analytics;
   state.dashboard = res.rows;
   renderAnalytics();
@@ -300,12 +310,14 @@ async function refreshDashboard() {
   $("#sumExpiredItems").textContent = res.rows.filter((row) => row.status === "EXPIRED").length;
   $("#sumCriticalItems").textContent = res.rows.filter((row) => row.status === "CRITICAL").length;
   $("#sumReorderItems").textContent = res.rows.filter((row) => Number(row.qty_sub) <= Number(row.reorder_point_sub)).length;
-  if (canViewPrices()) {
+  if (res.can_view_prices) {
     $("#sumValue").textContent = money(res.total_value);
     $("#sumAgingValue").textContent = money(res.rows
       .filter((row) => ["EXPIRED", "EXPIRING"].includes(row.status))
       .reduce((sum, row) => sum + Number(row.stock_value || 0), 0));
   }
+  $$('#dashboard .dashboard-filter-card').forEach(el=>el.classList.toggle('hidden',!res.permissions?.stock||(el.classList.contains('price-only')&&!res.can_view_prices)));
+  $('#inventoryVisualBoard').hidden=!res.can_view_prices;
   renderDashboardCardFilterState();
   renderDashboardColumns();
   renderDashboardTable();
@@ -456,7 +468,7 @@ async function refreshItems() {
 }
 
 function dashboardVisibleColumns() {
-  return dashboardColumns.filter(([key]) => canViewPrices() || !priceColumnKeys.has(key));
+  return dashboardColumns.filter(([key]) => (state.dashboardPermissions?.finance ?? canViewPrices()) || !priceColumnKeys.has(key));
 }
 
 async function loadItemColumnPreference(){
@@ -1890,7 +1902,7 @@ function renderInventoryVisual(a,rows){
  let offset=0;const stops=distribution.map(([,v],i)=>{const start=offset;offset+=v/total*100;return `${colors[i%colors.length]} ${start}% ${offset}%`;});
  const chartFilters=state.valueChartFilters||{sort:'desc',machine:'',supplier:''};
  const dashboardById=new Map(rows.map(row=>[row.item_id,row]));
- const chartList=list.map(row=>({...row,supplier:dashboardById.get(row.item_id)?.supplier||'ยังไม่ระบุ Supplier'}));
+ const chartList=list.map(row=>({...row,supplier:row.supplier||dashboardById.get(row.item_id)?.supplier||'ยังไม่ระบุ Supplier'}));
  const {rows:comparisons,max}=stockValueChanges(chartList.filter(row=>row.has_movement),chartFilters);
  const options=(key,label)=>`<option value="">${label}</option>`+[...new Set([...chartList.map(row=>row[key]),...(chartFilters[key]?[chartFilters[key]]:[])])].sort((a,b)=>a.localeCompare(b,'th',{numeric:true})).map(value=>`<option value="${esc(value)}"${chartFilters[key]===value?' selected':''}>${esc(value)}</option>`).join('');
  const chartControls=`<div class="visual-change-filters"><label>เรียงตาม<select data-change-filter="sort" aria-label="เรียงผลต่างมูลค่า">${[['desc','มากไปน้อย'],['asc','น้อยไปมาก'],['name','ตามตัวอักษร']].map(([value,label])=>`<option value="${value}"${(chartFilters.sort||'desc')===value?' selected':''}>${label}</option>`).join('')}</select></label><label>เครื่อง<select data-change-filter="machine" aria-label="กรองเครื่องในกราฟผลต่าง">${options('machine','ทุกเครื่อง')}</select></label><label>Supplier<select data-change-filter="supplier" aria-label="กรอง Supplier ในกราฟผลต่าง">${options('supplier','ทุก Supplier')}</select></label></div>`;
@@ -1899,7 +1911,7 @@ function renderInventoryVisual(a,rows){
  const turnovers=list.filter(r=>r.turnover!==null&&Number.isFinite(r.turnover)).sort((a,b)=>b.turnover-a.turnover),maxTurn=Math.max(1,...turnovers.map(r=>r.turnover));
  const empty='<p class="visual-empty">ยังไม่มีมูลค่าสำหรับช่วงเวลานี้</p>';
  const itemButton=r=>`<button class="visual-name" data-visual-item="${esc(r.item_id)}" title="ดูรายละเอียด ${esc(r.name)}">${esc(r.name)}</button>`;
- host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>STOCK VALUE CHANGE</h3><p>มูลค่าปลายงวด − ต้นงวด · บาท · เฉพาะรายการที่มีผลต่างมูลค่าในงวด ไม่รวมผลต่างศูนย์</p>${chartControls}<div class="visual-change-summary">ผลต่างรวมตามตัวกรอง <strong>${signed(Math.round(changeTotal*100)/100)}</strong> บาท · ${comparisons.length} รายการ</div><div class="visual-change-axis"><span>−${money(max)}</span><span>0</span><span>+${money(max)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-change-row">${itemButton(r)}<div class="visual-change-track" role="img" aria-label="${esc(r.name)} ผลต่าง ${signed(r.change)} บาท"><i title="${esc(r.name)} · ต้นงวด ${money(r.opening_value)} บาท · ปลายงวด ${money(r.closing_value)} บาท · ผลต่าง ${signed(r.change)} บาท" class="${r.change<0?'negative':'positive'}" style="left:${r.change<0?50-Math.abs(r.change)/max*50:50}%;width:${Math.abs(r.change)/max*50}%"></i></div><b class="visual-change-value ${r.change<0?'negative':r.change>0?'positive':''}">${signed(r.change)}</b></div>`).join(''):'<p class="visual-empty">ไม่มีรายการที่ตรงกับตัวกรอง</p>'}</div><div class="visual-change-legend"><span>← ลดลง (ลบ)</span><span>เพิ่มขึ้น (บวก) →</span></div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#e7edf5'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายสินค้า · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
+ host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',a.inventory?list.length:rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>STOCK VALUE CHANGE</h3><p>มูลค่าปลายงวด − ต้นงวด · บาท · เฉพาะรายการที่มีผลต่างมูลค่าในงวด ไม่รวมผลต่างศูนย์</p>${chartControls}<div class="visual-change-summary">ผลต่างรวมตามตัวกรอง <strong>${signed(Math.round(changeTotal*100)/100)}</strong> บาท · ${comparisons.length} รายการ</div><div class="visual-change-axis"><span>−${money(max)}</span><span>0</span><span>+${money(max)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-change-row">${itemButton(r)}<div class="visual-change-track" role="img" aria-label="${esc(r.name)} ผลต่าง ${signed(r.change)} บาท"><i title="${esc(r.name)} · ต้นงวด ${money(r.opening_value)} บาท · ปลายงวด ${money(r.closing_value)} บาท · ผลต่าง ${signed(r.change)} บาท" class="${r.change<0?'negative':'positive'}" style="left:${r.change<0?50-Math.abs(r.change)/max*50:50}%;width:${Math.abs(r.change)/max*50}%"></i></div><b class="visual-change-value ${r.change<0?'negative':r.change>0?'positive':''}">${signed(r.change)}</b></div>`).join(''):'<p class="visual-empty">ไม่มีรายการที่ตรงกับตัวกรอง</p>'}</div><div class="visual-change-legend"><span>← ลดลง (ลบ)</span><span>เพิ่มขึ้น (บวก) →</span></div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#e7edf5'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายสินค้า · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
  host.querySelectorAll('[data-change-filter]').forEach(select=>select.addEventListener('change',()=>{state.valueChartFilters={...chartFilters,[select.dataset.changeFilter]:select.value};renderInventoryVisual(a,rows);host.querySelector(`[data-change-filter="${select.dataset.changeFilter}"]`)?.focus();}));
  host.querySelectorAll('[data-visual-item]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{item:button.dataset.visualItem})));
  host.querySelectorAll('[data-visual-machine]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{machine:button.dataset.visualMachine})));
@@ -1908,11 +1920,11 @@ function renderInventoryVisual(a,rows){
 function renderAnalytics(){
  const a=state.analytics,rows=state.dashboard||[];
  if(!a)return;
- renderInventoryVisual(a,rows);
+ if(state.dashboardPermissions?.finance===false)$('#inventoryVisualBoard').innerHTML='';else renderInventoryVisual(a,rows);
  const all=rows.length,empty=rows.filter(r=>Number(r.qty_sub)<=0).length,rop=rows.filter(r=>Number(r.qty_sub)<=Number(r.reorder_point_sub)).length;
  const pct=(n,d)=>d>0?(n/d*100).toFixed(1)+'%':'ไม่มีข้อมูล';
  const pie=(n,d,color)=>`<div class="pie-layout"><div class="analytics-pie" style="background:conic-gradient(${color} 0 ${d?n/d*100:0}%,#e7edf5 0 100%)"><span>${pct(n,d)}</span></div><div><strong>${n} / ${d} รายการ</strong><p>นับเฉพาะรายการที่เปิดใช้งาน</p></div></div>`;
- const card=(key,title,sub,content,price=false)=>`<article class="analytics-card${price?' price-only':''}" ${key==='near'?'':'tabindex="0" role="button"'} data-analytic="${key}"><h3>${title}</h3><p>${sub}</p>${content}</article>`;
+ const card=(key,title,sub,content,price=false)=>{const group={stockout:'stock',reorder:'stock',near:'near',otif:'delivery',lead:'delivery',turnover:'finance',doh:'finance',wastage:'finance'}[key];if(state.dashboardPermissions&& !state.dashboardPermissions[group])return '';return `<article class="analytics-card${price?' price-only':''}" ${key==='near'?'':'tabindex="0" role="button"'} data-analytic="${key}"><h3>${title}</h3><p>${sub}</p>${content}</article>`;};
  const sum=(list,key)=>list.reduce((s,r)=>s+Number(r[key]||0),0);
  const inventory=a.inventory||[],groups=new Map();for(const row of inventory){if(!groups.has(row.machine))groups.set(row.machine,[]);groups.get(row.machine).push(row);}
  const machines=[...groups].map(([name,list])=>{const average=sum(list,'average_value'),used=sum(list,'used_value');return {name,average,used,value:average>0?used/average:null};});
@@ -1944,6 +1956,7 @@ function renderAnalytics(){
  card('near','Near-Expiry Alerts','FEFO · จำนวน Lot / รายการ แยกกลุ่มวันแบบไม่ซ้ำกัน',stacked+`<p>${legend}</p>`+'<p>คลิกชื่อเครื่องเพื่อดูทุก Lot หรือคลิกช่วงสีเพื่อดูเฉพาะกลุ่มวันหมดอายุ</p><button type="button" data-near-all>ดูทุกเครื่อง / ยี่ห้อ</button>')+
  card('otif','On-Time In-Full','สัดส่วนเอกสารที่รับครบภายในวันนัดส่ง · แยก Vendor',bars(vendors,'%', '#10b981',100)+`<p>ฐาน ${due.length} คู่เอกสาร/Vendor ที่ออกในช่วงและถึงวันนัดส่งแล้ว • ไม่รวมเอกสารที่ยังไม่ได้ระบุวันที่</p>`)+
  card('lead','Average Lead Time','วันรับครบจริง − วันออก PO · เฉลี่ยต่อเอกสาร/Vendor',`<strong class="metric">${leads.length?(sum(leads,'lead_days')/leads.length).toFixed(1)+' วัน':'ไม่มีข้อมูล'}</strong>${line}<p>จัดกลุ่มแนวโน้มตามเดือนที่รับครบ • คลิกเพื่อบันทึกวันออก PO / นัดส่ง</p>`);
+ if(state.dashboardPermissions&& !Object.values(state.dashboardPermissions).some(Boolean))$('#dashboardCharts').innerHTML='<p class="panel">ผู้ดูแลยังไม่ได้อนุญาตข้อมูล Dashboard สำหรับ Role ของคุณ</p>';
  $$('[data-analytic]').forEach(el=>{el.addEventListener('click',event=>{const drill=event.target.closest('[data-near-machine]');if(el.dataset.analytic==='near'&&drill){openAnalyticsDetails('near',{machine:drill.dataset.nearMachine,bucket:drill.dataset.nearBucket});return;}openAnalyticsDetails(el.dataset.analytic);});el.addEventListener('keydown',e=>{if(e.target!==el)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();openAnalyticsDetails(el.dataset.analytic);}});});
 }
 function openAnalyticsDetails(key,filter={}){

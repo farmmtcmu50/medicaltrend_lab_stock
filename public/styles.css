@@ -901,3 +901,6 @@ th[data-key="select"] { width:44px; min-width:44px; }
 #prMetaForm label { font-size:13px; gap:5px; }
 #prMetaForm input { min-width:0; width:100%; }
 @media(max-width:1000px) { .pr-heading-layout { grid-template-columns:minmax(0,1fr); gap:14px; } }
+
+#dashboardPermissionsForm label { display:flex; align-items:flex-start; gap:10px; }
+#dashboardPermissionsForm input[type="checkbox"] { width:auto; min-height:auto; flex:0 0 auto; margin-top:4px; }

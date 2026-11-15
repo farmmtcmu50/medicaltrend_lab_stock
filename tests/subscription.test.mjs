@@ -486,3 +486,24 @@ test('XLSX import previews without writes and commits validated products atomica
  preview=await upload();assert.equal(preview.data.valid,false);assert.equal(preview.data.import_id,null);assert.match(preview.data.rows[0].errors.join(' '),/ซ้ำ/);
  sheet.getCell('A2').value='Import invalid product';sheet.getCell('C2').value='Missing Supplier';sheet.getRow(3).values=[];preview=await upload();assert.equal(preview.data.valid,false);assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM items WHERE reagent_name='Import invalid product'").first()).n,0);
 });
+
+test('admin controls staff dashboard datasets without granting permissions in other menus or tenants',async()=>{
+ const cookie=await wfAuth(),staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const path='/api/settings/dashboard-permissions';
+ assert.equal((await tenantRequest('tenant-a',path,{cookie:staff})).status,403);
+ const permissions={stock:false,near:false,delivery:false,finance:false};
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie:staff,body:{role:'staff',permissions}})).status,403);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{role:'admin',permissions}})).status,400);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{role:'staff',permissions}})).status,200);
+ const denied=await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie:staff});
+ assert.deepEqual(denied.data.rows,[]);assert.deepEqual(denied.data.analytics.near,[]);assert.deepEqual(denied.data.analytics.deliveries,[]);assert.equal(denied.data.analytics.inventory,null);
+ assert.ok((await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie})).data.rows.length>0);
+ assert.ok((await tenantRequest('tenant-a','/api/pr-suggestions',{cookie:staff})).data.rows.length>0);
+ assert.equal((await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{role:'staff',permissions:{...permissions,finance:true}}})).status,200);
+ const granted=await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie:staff});
+ assert.ok(Array.isArray(granted.data.analytics.inventory));assert.equal(granted.data.can_view_prices,true);
+ const items=await tenantRequest('tenant-a','/api/items',{cookie:staff});assert.ok(items.data.rows.every(row=>!('unit_price' in row)&&!('main_unit_price' in row)));
+ const bCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-b',path,{cookie:bCookie})).data.permissions.finance,false);
+ await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{role:'staff',permissions:{stock:true,near:true,delivery:true,finance:false}}});
+});

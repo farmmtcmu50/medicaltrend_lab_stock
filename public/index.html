@@ -320,6 +320,7 @@
       <section id="settings" class="tab">
         <header class="page-head"><div><h2>ตั้งค่า</h2><p class="muted">Backup, Restore, Users, Audit และข้อมูลระบบ</p></div></header>
         <div class="settings-grid">
+          <section class="panel stack admin-only"><h3>สิทธิ์ Dashboard ตาม Role</h3><p>กำหนดข้อมูลที่ staff ทุกบัญชีมองเห็นใน Dashboard โดย admin เห็นครบเสมอ สิทธิ์ในเมนูอื่นยังใช้ตามเดิม</p><form id="dashboardPermissionsForm" class="stack"><strong>Role: staff</strong><label><input type="checkbox" name="stock"> ภาพรวมสต๊อก / Stockout / ROP และรายละเอียดสินค้า</label><label><input type="checkbox" name="near"> สินค้าใกล้หมดอายุ / หมดอายุ (FEFO)</label><label><input type="checkbox" name="delivery"> การส่งมอบ Supplier / OTIF / Lead Time</label><label><input type="checkbox" name="finance"> มูลค่าสต๊อก ต้นทุน อัตราหมุนเวียน DOH และมูลค่าตัดทิ้ง</label><p class="muted">การเปิดมูลค่า/ต้นทุนจะอนุญาตให้ staff เห็นข้อมูลราคาที่เกี่ยวข้องใน Dashboard</p><button class="primary">บันทึกสิทธิ์ Dashboard</button><p id="dashboardPermissionsStatus" role="status"></p></form></section>
           <section class="panel stack">
             <h3>Branding / การพิมพ์</h3>
             <form id="brandingForm" class="grid-form">

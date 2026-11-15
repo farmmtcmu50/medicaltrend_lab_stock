@@ -31,7 +31,7 @@ export function inventoryMetrics(items,events,range){
    }
   }
   const price=Number(i.unit_price),average=(opening+closing)/2*price;
-  return {item_id:i.item_id,name:i.name,machine:i.machine||'ไม่ระบุเครื่อง',has_movement:hasMovement,opening_value:opening*price,closing_value:closing*price,average_value:average,used_value:used*price,received_value:received*price,wasted_value:wasted,reasons,turnover:average>0?used*price/average:null};
+  return {item_id:i.item_id,name:i.name,supplier:i.supplier,machine:i.machine||'ไม่ระบุเครื่อง',has_movement:hasMovement,opening_value:opening*price,closing_value:closing*price,average_value:average,used_value:used*price,received_value:received*price,wasted_value:wasted,reasons,turnover:average>0?used*price/average:null};
  });
 }
 export async function analytics(env,params,items,prices){

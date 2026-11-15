@@ -220,3 +220,12 @@ test('PR list shows distinct suppliers and omits unused metadata columns',async(
  assert.equal(context.rendered.rows[0].suppliers,'Vendor A, Vendor B');
  assert.equal(context.rendered.rows[1].suppliers,'ยังไม่ระบุ Supplier');
 });
+
+test('dashboard only renders analytics cards granted to the role',async()=>{
+ const {context}=await workflowContext();
+ vm.runInContext(`state.dashboard=[];state.analytics={range:{start:'2026-11-01',end:'2026-11-15',days:15},near:[],deliveries:[],inventory:null};state.dashboardPermissions={stock:false,near:true,delivery:false,finance:false};renderAnalytics();`,context);
+ const html=vm.runInContext("$('#dashboardCharts').innerHTML",context);
+ assert.match(html,/Near-Expiry Alerts/);assert.doesNotMatch(html,/Stockout Rate|Reorder Point Trigger|On-Time In-Full|Average Lead Time|Days On Hand/);
+ vm.runInContext('state.dashboardPermissions.near=false;renderAnalytics()',context);
+ assert.match(vm.runInContext("$('#dashboardCharts').innerHTML",context),/ยังไม่ได้อนุญาต/);
+});
