@@ -1,3 +1,5 @@
+import { exportWorkbook } from './export-xlsx.js';
+import { snapshot, validateBackup, restoreInserts } from './backup.js';
 import { DASHBOARD_DEFAULTS, dashboardPermissions, dashboardProjection } from './dashboard-permissions.js';
 import { itemTemplate, previewItemImport, commitItemImport } from './item-import.js';
 import { resolveMachine, machineApi } from './machines.js';
@@ -132,7 +134,7 @@ async function api(request, env) {
   if (method === "PUT" && path === "/settings/expiring-days") return setExpiringDays(request, env, user);
   if (method === "PUT" && path === "/settings/branding") return setBranding(request, env, user);
   if (method === "GET" && path === "/export/excel") return exportExcel(env, user, false);
-  if (method === "GET" && path === "/backup") return backup(env, user);
+  if (method === "GET" && path === "/backup") { await requireAdmin(user); return backup(env, user); }
   if (method === "POST" && path === "/optimize") return optimize(env, user);
 
   const admin = await requireAdmin(user);
@@ -845,52 +847,31 @@ async function exportExcel(env, user, auditOnly) {
     sheets.PurchaseRequisitionItems = sheets.PurchaseRequisitionItems.map(stripPriceFields);
     delete sheets.AuditTrail;
   }
-  await logAudit(env, user.username, auditOnly ? "EXPORT_AUDIT_EXCEL" : "EXPORT_EXCEL", "file", auditOnly ? "audit.xls" : "lab_stock.xls");
-  const xml = spreadsheetXml(sheets);
-  return new Response(xml, {
+  await logAudit(env, user.username, auditOnly ? "EXPORT_AUDIT_EXCEL" : "EXPORT_EXCEL", "file", auditOnly ? "audit.xlsx" : "lab_stock.xlsx");
+  const workbook = exportWorkbook(sheets);
+  return new Response(workbook, {
     headers: {
-      "content-type": "application/vnd.ms-excel; charset=utf-8",
-      "content-disposition": `attachment; filename="${auditOnly ? "audit_trail_export" : "lab_stock_export"}.xls"`,
+      "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "cache-control": "no-store",
+      "content-disposition": `attachment; filename="${auditOnly ? "audit_trail_export" : "lab_stock_export"}.xlsx"`,
     },
   });
 }
 
 async function backup(env, user) {
-  const items = await tableRows(env, "items");
-  const data = {
-    exported_at: now(),
-    tables: {
-      items: canViewPrices(user) ? items : items.map(stripPriceFields),
-      stock_units: await tableRows(env, "stock_units"),
-      package_barcodes: await tableRows(env, "package_barcodes"),
-      movements: await tableRows(env, "movements"),
-      purchase_requisitions: await tableRows(env, "purchase_requisitions"),
-      purchase_requisition_items: canViewPrices(user)
-        ? await tableRows(env, "purchase_requisition_items")
-        : (await tableRows(env, "purchase_requisition_items")).map(stripPriceFields),
-      settings: await tableRows(env, "settings"),
-    },
-  };
-  if (canViewPrices(user)) {
-    for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers","machines"]) data.tables[table]=await tableRows(env,table);
-    data.tables.users = await tableRows(env, "users");
-    data.tables.audit_logs = await tableRows(env, "audit_logs");
-  }
-  await logAudit(env, user.username, "BACKUP_DATABASE", "database", "json");
-  return new Response(JSON.stringify(data, null, 2), {
-    headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="lab_stock_backup_${compactDate()}.json"` },
-  });
+  const data=await snapshot(env);
+  await logAudit(env,user.username,'BACKUP_DATABASE','database','json','SUCCESS',{counts:data.counts});
+  return new Response(JSON.stringify(data),{headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','content-disposition':`attachment; filename="lab_stock_backup_${compactDate()}.json"`}});
 }
 
 async function restore(request, env, admin) {
   const body = await readBody(request);
-  if (!body?.tables) throw httpError("ไฟล์ backup ไม่ถูกต้อง");
+  validateBackup(body);
   // Restore replaces the users table; refuse a backup that would lock the restoring admin out of Access.
   if (env.ACCESS_EMAIL && !(body.tables.users || []).some((u) => Number(u.is_active) === 1 && u.role === "admin" && String(u.email || "").trim().toLowerCase() === env.ACCESS_EMAIL)) {
     throw httpError(`ไฟล์ backup ไม่มี admin ที่ใช้อีเมล ${env.ACCESS_EMAIL} การ restore จะทำให้เข้าระบบไม่ได้`, 400);
   }
-  const safety = { exported_at: now(), tables: { items: await tableRows(env, "items"), stock_units: await tableRows(env, "stock_units"), package_barcodes: await tableRows(env, "package_barcodes"), movements: await tableRows(env, "movements"), purchase_requisitions: await tableRows(env, "purchase_requisitions"), purchase_requisition_items: await tableRows(env, "purchase_requisition_items"), settings: await tableRows(env, "settings"), users: await tableRows(env, "users"), audit_logs: await tableRows(env, "audit_logs") } };
-  for (const table of ["stock_operations","stock_operation_units","stock_counts","pr_delivery_terms","analytics_purchase_totals","suppliers","machines"]) safety.tables[table]=await tableRows(env,table);
+  const safety = body.return_safety_backup===false ? null : await snapshot(env);
   await replaceTables(env, body.tables);
   await logAudit(env, admin.username, "RESTORE_DATABASE", "database", "json", "SUCCESS", { safety_backup_created_in_browser: true });
   return json({ ok: true, safety_backup: safety });
@@ -939,14 +920,9 @@ async function replaceTables(env, tables) {
     const names=new Map([['manual','Manual']]);for(const item of tables.items||[]){const name=String(item.machine||'Manual').trim()||'Manual';names.set(name.toLowerCase(),name);}
     tables.machines=[...names.values()].map(name=>({machine_id:crypto.randomUUID(),name,is_active:1,created_at:now(),updated_at:now()}));
   }
-  const stmts = ["analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","suppliers","machines","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
-  const order = ["machines", "suppliers", "items", "stock_units", "package_barcodes", "movements", "purchase_requisitions", "purchase_requisition_items", "settings", "users", "audit_logs", "stock_operations", "stock_operation_units", "stock_counts", "pr_delivery_terms", "analytics_purchase_totals"];
-  for (const table of order) {
-    for (const row of tables[table] || []) {
-      const keys = Object.keys(row);
-      stmts.push(env.DB.prepare(`INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`).bind(...keys.map((k) => row[k])));
-    }
-  }
+  const inserts=await restoreInserts(env,tables);
+  const stmts = ["item_imports","pr_split_requests","analytics_purchase_totals","pr_delivery_terms","stock_operation_units","stock_counts","stock_operations","workflow_guards","audit_logs","purchase_requisition_items","purchase_requisitions","movements","stock_units","package_barcodes","items","suppliers","machines","settings","users"].map(table=>env.DB.prepare(`DELETE FROM ${table}`));
+  stmts.push(...inserts);
   await env.DB.batch(stmts);
 }
 
@@ -1044,27 +1020,6 @@ async function tableRows(env, table, suffix = "") {
 async function count(env, table, where) {
   const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).first();
   return Number(row?.n || 0);
-}
-
-function spreadsheetXml(sheets) {
-  const worksheets = Object.entries(sheets).map(([name, rows]) => {
-    const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-    const header = `<Row>${columns.map((c) => cell(c)).join("")}</Row>`;
-    const body = rows.map((row) => `<Row>${columns.map((c) => cell(row[c] ?? "")).join("")}</Row>`).join("");
-    return `<Worksheet ss:Name="${xml(name.slice(0, 31))}"><Table>${header}${body}</Table></Worksheet>`;
-  }).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheets}</Workbook>`;
-}
-
-function cell(value) {
-  const n = Number(value);
-  const type = value !== "" && Number.isFinite(n) && String(value).trim() === String(n) ? "Number" : "String";
-  return `<Cell><Data ss:Type="${type}">${xml(String(value))}</Data></Cell>`;
 }
 
 async function readBody(request) {

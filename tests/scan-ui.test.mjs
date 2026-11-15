@@ -229,3 +229,19 @@ test('dashboard only renders analytics cards granted to the role',async()=>{
  vm.runInContext('state.dashboardPermissions.near=false;renderAnalytics()',context);
  assert.match(vm.runInContext("$('#dashboardCharts').innerHTML",context),/ยังไม่ได้อนุญาต/);
 });
+
+test('backup downloads reject login pages, HTTP failures and incomplete JSON instead of reporting success',async()=>{
+ const {context}=await workflowContext();
+ context.response={ok:true,headers:{get:()=> 'text/html'}};context.fetch=async()=>context.response;
+ await assert.rejects(vm.runInContext("downloadDatabaseFile('/api/backup')",context),/เข้าสู่ระบบใหม่/);
+ context.response={ok:false,status:503,json:async()=>({error:'database unavailable'})};
+ await assert.rejects(vm.runInContext("downloadDatabaseFile('/api/backup')",context),/database unavailable/);
+ context.response={ok:true,headers:{get:()=> 'application/json'},blob:async()=>({size:2,text:async()=> '{}'})};
+ await assert.rejects(vm.runInContext("downloadDatabaseFile('/api/backup')",context),/ตรวจสอบไฟล์สำรองไม่ผ่าน/);
+});
+test('restore never writes when pre-restore safety backup download fails',async()=>{
+ const {context}=await workflowContext();context.calls=[];context.form={file:{files:[{text:async()=>JSON.stringify({tables:{items:[],stock_units:[],users:[]}})}]},querySelector:()=>({disabled:false})};
+ vm.runInContext(`confirmBox=async()=>true;downloadDatabaseFile=async path=>{calls.push(path);throw new Error('download failed');};api=async path=>calls.push(path);`,context);
+ await vm.runInContext('restoreBackup({preventDefault(){},target:form})',context);
+ assert.deepEqual(context.calls,['/api/backup']);
+});

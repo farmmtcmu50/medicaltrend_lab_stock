@@ -284,12 +284,13 @@ test('supplier registry requires item links, protects master edits, and preserve
  assert.equal((await tenantRequest('tenant-b','/api/suppliers/'+alpha,{cookie:otherCookie})).status,404);
  const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.ok(backup.data.tables.suppliers.some(r=>r.supplier_id===alpha));
  assert.equal((await call('/api/restore',backup.data)).status,200);
- assert.equal((await aDb.prepare('SELECT supplier_id FROM stock_units WHERE item_id=? AND lot=? LIMIT 1').bind(item,'ALPHA').first()).supplier_id,alpha); const legacy=structuredClone(backup.data);delete legacy.tables.suppliers;
+ assert.equal((await aDb.prepare('SELECT supplier_id FROM stock_units WHERE item_id=? AND lot=? LIMIT 1').bind(item,'ALPHA').first()).supplier_id,alpha); const legacy=structuredClone(backup.data);delete legacy.version;delete legacy.format;delete legacy.counts;delete legacy.tables.suppliers;
  for(const row of legacy.tables.items)delete row.supplier_id;
  for(const row of legacy.tables.stock_units){delete row.supplier_id;delete row.supplier_verified;}
  for(const row of legacy.tables.purchase_requisition_items)delete row.supplier_id;
  const restored=await call('/api/restore',legacy);assert.equal(restored.status,200,JSON.stringify(restored.data));
  assert.equal((await aDb.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+
 });
 
 test('supplier migration backfills populated legacy tables without inventing unknown suppliers',async()=>{
@@ -506,4 +507,28 @@ test('admin controls staff dashboard datasets without granting permissions in ot
  const bCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
  assert.equal((await tenantRequest('tenant-b',path,{cookie:bCookie})).data.permissions.finance,false);
  await tenantRequest('tenant-a',path,{method:'PUT',cookie,body:{role:'staff',permissions:{stock:true,near:true,delivery:true,finance:false}}});
+});
+
+test('full backups round-trip 21,000 stock rows; invalid backups leave the database unchanged',async()=>{
+ const cookie=await wfAuth(),time=new Date().toISOString();
+ const {restoreInserts}=await import('../src/backup.js');
+ const rows=Array.from({length:21000},(_,i)=>({barcode:`BACKUP-LARGE-${i}`,item_id:'shared-id',reagent_name:'Backup test',lot:'BULK',expiry_date:'2030-12-31',received_at:time,sub_unit:'ขวด',status:'IN_STOCK'}));
+ await aDb.batch(await restoreInserts({DB:aDb},{stock_units:rows}));
+ const backup=await tenantRequest('tenant-a','/api/backup',{cookie});assert.equal(backup.status,200);assert.equal(backup.data.version,2);assert.ok(backup.data.counts.stock_units>=21000);assert.ok(Array.isArray(backup.data.tables.pr_split_requests));
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/backup',{cookie:staff})).status,403);
+ for(const alter of [data=>delete data.tables.stock_units,data=>data.counts.items++,data=>data.tables.items[0]['invalid_column']=1]){
+  const bad=structuredClone(backup.data);alter(bad);
+  const response=await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:{...bad,return_safety_backup:false}});assert.equal(response.status,400,JSON.stringify(response.data));
+  assert.equal((await aDb.prepare('SELECT COUNT(*) n FROM stock_units').first()).n,backup.data.counts.stock_units);
+ }
+ const duplicate=structuredClone(backup.data);duplicate.tables.items.push({...duplicate.tables.items[0]});duplicate.counts.items++;
+ const failed=await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:{...duplicate,return_safety_backup:false}});assert.equal(failed.status,500);
+ assert.equal((await aDb.prepare('SELECT COUNT(*) n FROM stock_units').first()).n,backup.data.counts.stock_units);
+ const restored=await tenantRequest('tenant-a','/api/restore',{method:'POST',cookie,body:{...backup.data,return_safety_backup:false}});assert.equal(restored.status,200,JSON.stringify(restored.data));
+ for(const [table,count] of Object.entries(backup.data.counts))if(table!=='audit_logs')assert.equal((await aDb.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n,count,table);
+ assert.equal((await aDb.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ const excel=await mf.dispatchFetch('https://tenant-a.example/api/export/excel',{headers:{cookie}});assert.equal(excel.status,200);assert.match(excel.headers.get('content-disposition'),/\.xlsx/);
+ const {unzipSync,strFromU8}=await import('fflate'),archive=unzipSync(new Uint8Array(await excel.arrayBuffer()));
+ const stockSheet=strFromU8(archive['xl/worksheets/sheet3.xml']);assert.equal((stockSheet.match(/<row r=/g)||[]).length,backup.data.counts.stock_units+1);
 });

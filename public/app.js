@@ -169,8 +169,13 @@ function bindUi() {
   $("#brandingForm").logo.addEventListener("change", previewBrandingLogo);
   $("#changePasswordForm").addEventListener("submit", changeOwnPassword);
   $("#restoreForm").addEventListener("submit", restoreBackup);
+  $$('a[href="/api/backup"],a[href^="/api/export/"]').forEach(link=>link.addEventListener('click',async event=>{
+    event.preventDefault();if(link.dataset.busy)return;link.dataset.busy='1';link.setAttribute('aria-disabled','true');
+    $('#databaseTransferStatus').textContent='กำลังเตรียมไฟล์ กรุณารอ…';
+    try{await downloadDatabaseFile(link.getAttribute('href'));$('#databaseTransferStatus').textContent='เตรียมไฟล์ครบแล้ว และส่งไฟล์ให้เบราว์เซอร์ดาวน์โหลด กรุณาตรวจโฟลเดอร์ Downloads';toast('ดาวน์โหลดไฟล์แล้ว');}catch(error){$('#databaseTransferStatus').textContent=error.message;toast(error.message,true);}finally{delete link.dataset.busy;link.removeAttribute('aria-disabled');}
+  }));
   $("#clearForm").addEventListener("submit", clearDatabase);
-  $("#optimizeBtn").addEventListener("click", optimizeDb);
+  $("#optimizeBtn").addEventListener("click", () => optimizeDb().catch(error => toast(error.message,true)));
   for(const id of ['dashboardTable','analyticsDetailsTable'])$('#'+id).addEventListener('click',event=>{const button=event.target.closest('[data-expired-dispose]');if(button)openExpiredDisposal(button.dataset.expiredDispose,button.dataset.lot,button.dataset.expiry).catch(e=>toast(e.message,true));});
   $('#cancelExpiredDisposalBtn').addEventListener('click',()=>$('#expiredDisposalDialog').close());
   $('#expiredDisposalForm').lot_index.addEventListener('change',updateExpiredDisposalBalance);
@@ -1511,16 +1516,36 @@ async function clearDatabase(e) {
   toast("ลบข้อมูลแล้ว");
 }
 
+function verifyBackupFile(data){
+ if(!data?.tables||!Array.isArray(data.tables.items)||!Array.isArray(data.tables.stock_units)||!Array.isArray(data.tables.users))throw new Error('ไฟล์นี้ไม่ใช่ JSON Backup ที่ใช้กู้คืนได้');
+ if(data.version===2)for(const [table,rows] of Object.entries(data.tables))if(!Array.isArray(rows)||data.counts?.[table]!==rows.length)throw new Error('ไฟล์ Backup ไม่ครบหรือจำนวนแถวไม่ตรง: '+table);
+ return data;
+}
+async function downloadDatabaseFile(path){
+ const response=await fetch(path,{credentials:'same-origin',cache:'no-store'});
+ if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.error||`ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})`);}
+ const contentType=response.headers.get('content-type')||'';
+ if(contentType.includes('text/html'))throw new Error('กรุณาเข้าสู่ระบบใหม่ แล้วลองดาวน์โหลดอีกครั้ง');
+ const blob=await response.blob();if(!blob.size)throw new Error('ไฟล์ที่ดาวน์โหลดไม่มีข้อมูล');
+ let data=null;
+ if(path==='/api/backup'){try{data=verifyBackupFile(JSON.parse(await blob.text()));}catch(error){throw new Error('ตรวจสอบไฟล์สำรองไม่ผ่าน: '+error.message);}}
+ const name=response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/)?.[1]||(data?'stock_backup.json':'stock_export.xlsx');
+ downloadBlob(blob,name);
+ return data;
+}
 async function restoreBackup(e) {
-  e.preventDefault();
-  const file = e.target.file.files[0];
-  if (!file) return toast("กรุณาเลือกไฟล์ backup", true);
-  if (!(await confirmBox("Restore Database", "ระบบจะสร้าง safety backup ใน browser ก่อน restore ยืนยันทำต่อ?"))) return;
-  const data = JSON.parse(await file.text());
-  const res = await api("/api/restore", { method: "POST", body: data });
-  downloadJson(res.safety_backup, `safety_backup_before_restore_${Date.now()}.json`);
-  await refreshAll();
-  toast("Restore database แล้ว และดาวน์โหลด safety backup ให้แล้ว");
+ e.preventDefault();const form=e.target,file=form.file.files[0],button=form.querySelector('button');
+ if(!file)return toast('กรุณาเลือกไฟล์ backup',true);
+ button.disabled=true;
+ try{
+  let data;try{data=verifyBackupFile(JSON.parse(await file.text()));}catch(error){throw new Error('อ่านไฟล์ Backup ไม่สำเร็จ: '+error.message);}
+  if(!(await confirmBox('Restore Database',`แทนที่ข้อมูลด้วย Backup: ${data.tables.items.length} สินค้า / ${data.tables.stock_units.length} แถวสต๊อก ระบบจะดาวน์โหลด Backup ปัจจุบันก่อนเริ่ม กรุณาเก็บไฟล์นี้ไว้เพื่อกู้คืนหากจำเป็น`)))return;
+  $('#databaseTransferStatus').textContent='กำลังดาวน์โหลด Backup ปัจจุบันก่อน Restore…';
+  await downloadDatabaseFile('/api/backup');
+  $('#databaseTransferStatus').textContent='กำลังกู้คืนข้อมูล กรุณารอ…';
+  await api('/api/restore',{method:'POST',body:{...data,return_safety_backup:false}});
+  await refreshAll();$('#databaseTransferStatus').textContent='Restore สำเร็จ มีไฟล์สำรองก่อนกู้คืนใน Downloads';toast('Restore database แล้ว');
+ }catch(error){$('#databaseTransferStatus').textContent=error.message;toast(error.message,true);}finally{button.disabled=false;}
 }
 
 async function refreshUsers() {
@@ -1704,13 +1729,12 @@ async function confirmBox(title, html) {
   return value === "ok";
 }
 
+function downloadBlob(blob,filename){
+ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;
+ document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 function downloadJson(data, filename) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+ downloadBlob(new Blob([JSON.stringify(data)],{type:'application/json'}),filename);
 }
 
 // Durable client request IDs let a lost response be checked or retried safely.

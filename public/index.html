@@ -336,10 +336,12 @@
           <section class="panel stack">
             <h3>Database / Export</h3>
             <div class="button-row">
-              <a class="button" href="/api/backup">Backup Database</a>
+              <a class="button admin-only" href="/api/backup">Backup Database (JSON)</a>
               <a class="button" href="/api/export/excel">Export Excel</a>
               <button id="optimizeBtn">ตรวจสอบ/Optimize database</button>
             </div>
+            <p id="databaseTransferStatus" role="status" aria-live="polite"></p>
+            <p class="muted">JSON Backup ใช้สำหรับกู้คืนข้อมูล ส่วน Export Excel ใช้สำหรับเปิดดูรายงาน</p>
             <form id="restoreForm" class="stack admin-only">
               <label>Restore JSON Backup<input name="file" type="file" accept=".json,application/json"></label>
               <button>Restore Database พร้อม backup ก่อน restore</button>
