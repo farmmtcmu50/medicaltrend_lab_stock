@@ -245,3 +245,17 @@ test('restore never writes when pre-restore safety backup download fails',async(
  await vm.runInContext('restoreBackup({preventDefault(){},target:form})',context);
  assert.deepEqual(context.calls,['/api/backup']);
 });
+
+test('settings tabs show one panel and respect admin and Access restrictions',async()=>{
+ const {context}=await workflowContext();
+ const make=(key,classes=[])=>({dataset:{settingsTab:key},classList:{contains:name=>classes.includes(name)},setAttribute(name,value){this[name]=value;}});
+ const buttons=[make('branding'),make('database'),make('permissions',['admin-only']),make('password',['password-only']),make('system')];
+ const panels=buttons.map(button=>({dataset:{settingsPanel:button.dataset.settingsTab}}));
+ context.buttons=buttons;context.panels=panels;
+ vm.runInContext(`document.querySelectorAll=selector=>selector==='[data-settings-tab]'?buttons:selector==='[data-settings-panel]'?panels:[];state.user={role:'admin'};state.auth='access';selectSettingsTab('permissions');`,context);
+ assert.equal(panels.filter(panel=>!panel.hidden).length,1);assert.equal(panels[2].hidden,false);assert.equal(buttons[2]['aria-selected'],'true');assert.equal(buttons[3].hidden,true);
+ vm.runInContext(`state.user.role='staff';selectSettingsTab('permissions');`,context);
+ assert.equal(panels[0].hidden,false);assert.equal(panels[2].hidden,true);assert.equal(buttons[2].hidden,true);
+ vm.runInContext(`state.auth='password';selectSettingsTab('password');`,context);
+ assert.equal(panels[3].hidden,false);assert.equal(buttons.filter(button=>button.tabIndex===0).length,1);
+});

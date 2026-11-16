@@ -54,6 +54,16 @@ async function boot() {
 }
 
 function bindUi() {
+  $$('[data-settings-tab]').forEach(button=>{
+    button.addEventListener('click',()=>selectSettingsTab(button.dataset.settingsTab));
+    button.addEventListener('keydown',event=>{
+      const buttons=settingsTabButtons(),index=buttons.indexOf(button);let next;
+      if(event.key==='ArrowRight')next=(index+1)%buttons.length;
+      else if(event.key==='ArrowLeft')next=(index-1+buttons.length)%buttons.length;
+      else if(event.key==='Home')next=0;else if(event.key==='End')next=buttons.length-1;else return;
+      event.preventDefault();selectSettingsTab(buttons[next].dataset.settingsTab);buttons[next].focus();
+    });
+  });
   bindWorkflowUi();
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -202,6 +212,18 @@ function showApp() {
   $$(".admin-only").forEach((el) => el.classList.toggle("hidden", state.user.role !== "admin"));
   $$(".password-only").forEach((el) => el.classList.toggle("hidden", state.auth === "access"));
   $$(".price-only").forEach((el) => el.classList.toggle("hidden", !canViewPrices()));
+  selectSettingsTab(state.settingsTab || "branding");
+}
+
+function settingsTabButtons(){
+ return $$('[data-settings-tab]').filter(button=>(!button.classList.contains('admin-only')||state.user?.role==='admin')&&(!button.classList.contains('password-only')||state.auth!=='access'));
+}
+function selectSettingsTab(key){
+ const buttons=settingsTabButtons(),selected=buttons.find(button=>button.dataset.settingsTab===key)||buttons[0];
+ if(!selected)return;
+ state.settingsTab=selected.dataset.settingsTab;
+ $$('[data-settings-tab]').forEach(button=>{const active=button===selected;button.hidden=!buttons.includes(button);button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+ $$('[data-settings-panel]').forEach(panel=>{panel.hidden=panel.dataset.settingsPanel!==state.settingsTab;});
 }
 
 function switchTab(tab) {

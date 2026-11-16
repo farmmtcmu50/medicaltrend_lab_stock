@@ -319,9 +319,18 @@
 
       <section id="settings" class="tab">
         <header class="page-head"><div><h2>ตั้งค่า</h2><p class="muted">Backup, Restore, Users, Audit และข้อมูลระบบ</p></div></header>
-        <div class="settings-grid">
-          <section class="panel stack admin-only"><h3>สิทธิ์ Dashboard ตาม Role</h3><p>กำหนดข้อมูลที่ staff ทุกบัญชีมองเห็นใน Dashboard โดย admin เห็นครบเสมอ สิทธิ์ในเมนูอื่นยังใช้ตามเดิม</p><form id="dashboardPermissionsForm" class="stack"><strong>Role: staff</strong><label><input type="checkbox" name="stock"> ภาพรวมสต๊อก / Stockout / ROP และรายละเอียดสินค้า</label><label><input type="checkbox" name="near"> สินค้าใกล้หมดอายุ / หมดอายุ (FEFO)</label><label><input type="checkbox" name="delivery"> การส่งมอบ Supplier / OTIF / Lead Time</label><label><input type="checkbox" name="finance"> มูลค่าสต๊อก ต้นทุน อัตราหมุนเวียน DOH และมูลค่าตัดทิ้ง</label><p class="muted">การเปิดมูลค่า/ต้นทุนจะอนุญาตให้ staff เห็นข้อมูลราคาที่เกี่ยวข้องใน Dashboard</p><button class="primary">บันทึกสิทธิ์ Dashboard</button><p id="dashboardPermissionsStatus" role="status"></p></form></section>
-          <section class="panel stack">
+        <div class="settings-tabs" role="tablist" aria-label="หัวข้อการตั้งค่า">
+          <button type="button" id="settings-tab-branding" class="settings-tab-button " data-settings-tab="branding" role="tab" aria-controls="settings-panel-branding" aria-selected="true" tabindex="0">โลโก้ / ชื่อองค์กร</button>
+          <button type="button" id="settings-tab-database" class="settings-tab-button " data-settings-tab="database" role="tab" aria-controls="settings-panel-database" aria-selected="false" tabindex="-1">ฐานข้อมูล / Export</button>
+          <button type="button" id="settings-tab-permissions" class="settings-tab-button admin-only" data-settings-tab="permissions" role="tab" aria-controls="settings-panel-permissions" aria-selected="false" tabindex="-1">สิทธิ์ Dashboard</button>
+          <button type="button" id="settings-tab-users" class="settings-tab-button admin-only" data-settings-tab="users" role="tab" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">ผู้ใช้งาน</button>
+          <button type="button" id="settings-tab-audit" class="settings-tab-button admin-only" data-settings-tab="audit" role="tab" aria-controls="settings-panel-audit" aria-selected="false" tabindex="-1">Audit Trail</button>
+          <button type="button" id="settings-tab-password" class="settings-tab-button password-only" data-settings-tab="password" role="tab" aria-controls="settings-panel-password" aria-selected="false" tabindex="-1">รหัสผ่าน</button>
+          <button type="button" id="settings-tab-system" class="settings-tab-button " data-settings-tab="system" role="tab" aria-controls="settings-panel-system" aria-selected="false" tabindex="-1">ข้อมูลระบบ</button>
+        </div>
+        <div class="settings-panels">
+          <section class="panel stack admin-only" id="settings-panel-permissions" data-settings-panel="permissions" role="tabpanel" aria-labelledby="settings-tab-permissions" tabindex="0" hidden><h3>สิทธิ์ Dashboard ตาม Role</h3><p>กำหนดข้อมูลที่ staff ทุกบัญชีมองเห็นใน Dashboard โดย admin เห็นครบเสมอ สิทธิ์ในเมนูอื่นยังใช้ตามเดิม</p><form id="dashboardPermissionsForm" class="stack"><strong>Role: staff</strong><label><input type="checkbox" name="stock"> ภาพรวมสต๊อก / Stockout / ROP และรายละเอียดสินค้า</label><label><input type="checkbox" name="near"> สินค้าใกล้หมดอายุ / หมดอายุ (FEFO)</label><label><input type="checkbox" name="delivery"> การส่งมอบ Supplier / OTIF / Lead Time</label><label><input type="checkbox" name="finance"> มูลค่าสต๊อก ต้นทุน อัตราหมุนเวียน DOH และมูลค่าตัดทิ้ง</label><p class="muted">การเปิดมูลค่า/ต้นทุนจะอนุญาตให้ staff เห็นข้อมูลราคาที่เกี่ยวข้องใน Dashboard</p><button class="primary">บันทึกสิทธิ์ Dashboard</button><p id="dashboardPermissionsStatus" role="status"></p></form></section>
+          <section class="panel stack" id="settings-panel-branding" data-settings-panel="branding" role="tabpanel" aria-labelledby="settings-tab-branding" tabindex="0">
             <h3>Branding / การพิมพ์</h3>
             <form id="brandingForm" class="grid-form">
               <label>ชื่อแล็บ<input name="lab_name" maxlength="120" required></label>
@@ -333,7 +342,7 @@
               <button class="primary span-2">บันทึก Logo / ชื่อแล็บ</button>
             </form>
           </section>
-          <section class="panel stack">
+          <section class="panel stack" id="settings-panel-database" data-settings-panel="database" role="tabpanel" aria-labelledby="settings-tab-database" tabindex="0" hidden>
             <h3>Database / Export</h3>
             <div class="button-row">
               <a class="button admin-only" href="/api/backup">Backup Database (JSON)</a>
@@ -355,7 +364,7 @@
               <button class="danger">ลบข้อมูลใน Database ทั้งหมด</button>
             </form>
           </section>
-          <section class="panel stack password-only">
+          <section class="panel stack password-only" id="settings-panel-password" data-settings-panel="password" role="tabpanel" aria-labelledby="settings-tab-password" tabindex="0" hidden>
             <h3>เปลี่ยนรหัสผ่านของฉัน</h3>
             <form id="changePasswordForm" class="grid-form">
               <label>รหัสผ่านเดิม<input name="current_password" type="password" autocomplete="current-password" required></label>
@@ -364,11 +373,11 @@
               <button class="primary">บันทึกรหัสผ่านใหม่</button>
             </form>
           </section>
-          <section class="panel">
+          <section class="panel" id="settings-panel-system" data-settings-panel="system" role="tabpanel" aria-labelledby="settings-tab-system" tabindex="0" hidden>
             <h3>ข้อมูลระบบ</h3>
             <dl id="systemInfo" class="info-list"></dl>
           </section>
-          <section class="panel admin-only">
+          <section class="panel admin-only" id="settings-panel-users" data-settings-panel="users" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
             <div class="page-head compact">
               <h3>จัดการผู้ใช้งาน</h3>
             </div>
@@ -382,7 +391,7 @@
             </form>
             <div class="table-wrap small"><table id="usersTable" class="data-table sortable"></table></div>
           </section>
-          <section class="panel admin-only">
+          <section class="panel admin-only" id="settings-panel-audit" data-settings-panel="audit" role="tabpanel" aria-labelledby="settings-tab-audit" tabindex="0" hidden>
             <div class="page-head compact">
               <h3>Audit Trail</h3>
               <a class="button" href="/api/export/audit">Export Audit Excel</a>

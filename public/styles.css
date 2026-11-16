@@ -904,3 +904,12 @@ th[data-key="select"] { width:44px; min-width:44px; }
 
 #dashboardPermissionsForm label { display:flex; align-items:flex-start; gap:10px; }
 #dashboardPermissionsForm input[type="checkbox"] { width:auto; min-height:auto; flex:0 0 auto; margin-top:4px; }
+
+.settings-tabs { display:flex; gap:4px; overflow-x:auto; padding:4px 4px 0; border-bottom:1px solid var(--line); margin-bottom:0; }
+.settings-tab-button { flex:0 0 auto; border:0; border-radius:8px 8px 0 0; background:transparent; box-shadow:none; color:var(--muted); padding:12px 18px; border-bottom:3px solid transparent; white-space:nowrap; }
+.settings-tab-button[aria-selected="true"] { background:#fff; color:#1f6feb; border-bottom-color:#1f6feb; font-weight:700; }
+.settings-tab-button:focus-visible { outline:2px solid #1f6feb; outline-offset:-3px; }
+.settings-panels { min-width:0; background:#fff; border:1px solid var(--line); border-top:0; border-radius:0 0 10px 10px; }
+.settings-panels > .panel { margin:0; padding:24px; border:0; border-radius:0; box-shadow:none; min-width:0; }
+.settings-panels .table-wrap.small { max-height:60vh; }
+@media (max-width:640px) { .settings-tab-button { padding:10px 12px; } .settings-panels > .panel { padding:16px; } }
