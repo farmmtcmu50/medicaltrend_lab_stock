@@ -2028,8 +2028,15 @@ async function refreshMachineMaster(){const result=await api('/api/machines');st
 async function refreshMachineRegistry(){await refreshMachineMaster();renderMachineRegistry();}
 function renderMachineRegistry(){
  const q=$('#machineSearch').value.trim().toLowerCase(),rows=state.machines.filter(row=>row.name.toLowerCase().includes(q));
- renderTable($('#machinesTable'),[['name','ชื่อเครื่อง'],['item_count','จำนวนสินค้า'],['is_active','สถานะ'],['actions','จัดการ']],rows,{is_active:value=>value?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,row)=>state.user.role==='admin'?`<button data-edit-machine="${esc(row.machine_id)}">แก้ไข</button>`:''});
+ renderTable($('#machinesTable'),[['name','ชื่อเครื่อง'],['item_count','จำนวนสินค้า'],['is_active','สถานะ'],['actions','จัดการ']],rows,{is_active:value=>value?'เปิดใช้งาน':'ปิดใช้งาน',actions:(_,row)=>state.user.role==='admin'?(row.machine_id==='MCH-UNASSIGNED'||row.name==='ไม่กำหนดเครื่อง'?'กลุ่มระบบ':`<div class="row-actions"><button data-edit-machine="${esc(row.machine_id)}">แก้ไข</button><button class="danger" data-delete-machine="${esc(row.machine_id)}">ลบ</button></div>`):''});
  $$('[data-edit-machine]').forEach(button=>button.addEventListener('click',()=>openMachineForm(button.dataset.editMachine)));
+ $$('[data-delete-machine]').forEach(button=>button.addEventListener('click',()=>deleteMachine(button.dataset.deleteMachine,button)));
+}
+async function deleteMachine(id,button){
+ const row=state.machines.find(row=>row.machine_id===id);if(!row)return;
+ if(!(await confirmBox('ลบเครื่อง',`ลบเครื่อง “${row.name}” และย้ายสินค้า/ข้อมูลสต๊อกทั้งหมดไปกลุ่ม “ไม่กำหนดเครื่อง” โดยจำนวนคงเหลือไม่เปลี่ยน ยืนยันหรือไม่?`)))return;
+ button.disabled=true;
+ try{await api('/api/machines/'+encodeURIComponent(id),{method:'DELETE'});await Promise.all([refreshMachineRegistry(),refreshItems(),refreshDashboard(),refreshPrSuggestions()]);['stock','reprint','reports','suppliers'].forEach(tab=>state.stockViewsDirty.add(tab));await refreshStock();toast('ลบเครื่องและย้ายข้อมูลไปไม่กำหนดเครื่องแล้ว');}catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 function openMachineForm(id){
  const row=state.machines.find(row=>row.machine_id===id),form=$('#machineForm');form.reset();form.machine_id.value=id||'';form.name.value=row?.name||'';form.is_active.checked=row?Boolean(row.is_active):true;$('#machineFormError').textContent='';$('#machineDialog').showModal();

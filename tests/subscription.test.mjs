@@ -532,3 +532,25 @@ test('full backups round-trip 21,000 stock rows; invalid backups leave the datab
  const {unzipSync,strFromU8}=await import('fflate'),archive=unzipSync(new Uint8Array(await excel.arrayBuffer()));
  const stockSheet=strFromU8(archive['xl/worksheets/sheet3.xml']);assert.equal((stockSheet.match(/<row r=/g)||[]).length,backup.data.counts.stock_units+1);
 });
+
+test('deleting a machine moves all product and stock records to a protected unassigned group',async()=>{
+ const cookie=await wfAuth(),call=(path,body,method='POST')=>tenantRequest('tenant-a',path,{method,cookie,body});
+ const created=await call('/api/machines',{name:'Machine to delete'});assert.equal(created.status,200);const id=created.data.machine_id;
+ const supplier=(await aDb.prepare('SELECT supplier_id FROM suppliers WHERE is_active=1 AND is_placeholder=0 LIMIT 1').first()).supplier_id;
+ const added=await call('/api/items',{reagent_name:'Machine deletion item',machine:'Machine to delete',main_unit:'BOX',sub_unit:'TEST',sub_per_main:2,has_sub_unit:1,supplier_id:supplier,main_unit_price:40});assert.equal(added.status,200,JSON.stringify(added.data));const item=added.data.item_id;
+ const received=await wfPost('/api/receive',{item_id:item,quantity:2,unit_mode:'main',sticker_mode:'main',lot:'DELETE-MACHINE',expiry_date:'2030-12-31'},cookie);assert.equal(received.status,200);
+ assert.equal((await wfPost('/api/consume',{barcode:received.data.labels[0].code,package_quantity:2},cookie)).status,200);
+ const before=(await aDb.prepare('SELECT status,COUNT(*) n FROM stock_units WHERE item_id=? GROUP BY status ORDER BY status').bind(item).all()).results;
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/machines/'+id,{method:'DELETE',cookie:staff})).status,403);
+ assert.equal((await call('/api/machines/'+id,{},'DELETE')).status,200);
+ assert.equal(await aDb.prepare('SELECT machine_id FROM machines WHERE machine_id=?').bind(id).first(),null);
+ assert.equal((await aDb.prepare('SELECT machine FROM items WHERE item_id=?').bind(item).first()).machine,'ไม่กำหนดเครื่อง');
+ for(const table of ['stock_units','package_barcodes'])assert.equal((await aDb.prepare(`SELECT COUNT(*) n FROM ${table} WHERE item_id=? AND machine<>'ไม่กำหนดเครื่อง'`).bind(item).first()).n,0);
+ assert.deepEqual((await aDb.prepare('SELECT status,COUNT(*) n FROM stock_units WHERE item_id=? GROUP BY status ORDER BY status').bind(item).all()).results,before);
+ assert.equal((await call('/api/machines/'+id,{},'DELETE')).status,200);
+ const target=await aDb.prepare("SELECT machine_id FROM machines WHERE name='ไม่กำหนดเครื่อง'").first();
+ assert.equal((await call('/api/machines/'+target.machine_id,{},'DELETE')).status,400);
+ assert.equal((await call('/api/machines/'+target.machine_id,{name:'Renamed',is_active:0},'PUT')).status,400);
+ assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='DELETE_MACHINE' AND target_id=?").bind(id).first()).n,1);
+});
