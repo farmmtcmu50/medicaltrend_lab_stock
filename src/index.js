@@ -1,3 +1,4 @@
+import { executiveSummary } from './executive.js';
 import { exportWorkbook } from './export-xlsx.js';
 import { snapshot, validateBackup, restoreInserts } from './backup.js';
 import { DASHBOARD_DEFAULTS, dashboardPermissions, dashboardProjection } from './dashboard-permissions.js';
@@ -70,6 +71,7 @@ async function api(request, env) {
     }
     throw httpError('Method not allowed',405);
   }
+  if(method==='GET'&&path==='/reports/executive'){await requireAdmin(user);return json(await executiveSummary(env,url.searchParams),200,{"cache-control":"no-store"});}
   const flow = workflows(env,user);
   if (method === "GET" && path === "/operations/status") return json(await flow.status(request));
   if (method === "GET" && /^\/operations\/[^/]+\/units$/.test(path)) return json(await flow.details(path.split('/')[2]));

@@ -554,3 +554,16 @@ test('deleting a machine moves all product and stock records to a protected unas
  assert.equal((await call('/api/machines/'+target.machine_id,{name:'Renamed',is_active:0},'PUT')).status,400);
  assert.equal((await aDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='DELETE_MACHINE' AND target_id=?").bind(id).first()).n,1);
 });
+
+test('executive report is admin-only, tenant isolated and independent from Dashboard filters',async()=>{
+ const cookie=await wfAuth(),staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ assert.equal((await tenantRequest('tenant-a','/api/reports/executive?period=month',{cookie:staff})).status,403);
+ const response=await tenantRequest('tenant-a','/api/reports/executive?period=month',{cookie});assert.equal(response.status,200,JSON.stringify(response.data));
+ const d=response.data;assert.ok(d.stock.items>0);assert.equal(d.previous_range.days,d.range.days);assert.ok(d.previous_range.end<d.range.start);assert.ok(d.details.every(row=>row.name!=='B reagent'));
+ const none=await tenantRequest('tenant-a','/api/reports/executive?period=week&machine=NO-SUCH-MACHINE&supplier=NO-SUCH-SUPPLIER',{cookie});assert.equal(none.status,200);assert.equal(none.data.stock.items,0);assert.equal(none.data.metrics.doh,null);assert.deepEqual(none.data.near,[]);assert.deepEqual(none.data.procurement.deliveries,[]);
+ const dashboard=await tenantRequest('tenant-a','/api/dashboard?period=day',{cookie});assert.ok(dashboard.data.rows.length>0);
+ const again=await tenantRequest('tenant-a','/api/reports/executive?period=month',{cookie});assert.equal(again.data.stock.items,d.stock.items);
+ assert.equal((await tenantRequest('tenant-a','/api/reports/executive?period=custom&start=2026-02-30&end=2026-03-01',{cookie})).status,400);
+ const bCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
+ const b=await tenantRequest('tenant-b','/api/reports/executive?period=month',{cookie:bCookie});assert.equal(b.status,200);assert.ok(!b.data.details.some(row=>row.name==='A reagent'));
+});

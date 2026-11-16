@@ -47,7 +47,10 @@
         <button class="nav" data-tab="consume"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4"/><path d="M14 5h4"/><path d="M6 19h4"/><path d="M14 19h4"/><path d="M5 6v4"/><path d="M19 6v4"/><path d="M5 14v4"/><path d="M19 14v4"/><path d="M8 12h8"/><path d="m13.5 9.5 2.5 2.5-2.5 2.5"/></svg></span>ตัด Stock</button>
         <button class="nav" data-tab="operations"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7"/><path d="M3 4v7h7"/><path d="M12 7v5l3 2"/></svg></span>ประวัติ / กลับรายการ</button>
         <button class="nav" data-tab="counts"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5v17h14V4h-4"/><path d="M9 3h6v4H9z"/><path d="m8 13 2 2 5-5"/><path d="M8 18h8"/></svg></span>ตรวจนับสต๊อก</button>
+        <div class="nav-group">
         <button class="nav" data-tab="reports"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3 3V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M14.5 3.5V7H18"/><path d="M8 11h8"/><path d="M8 15h8"/><path d="M8 18h5"/></svg></span>รายงาน</button>
+          <div class="nav-children"><button class="nav nav-sub admin-only" data-tab="executive">Executive Summary</button></div>
+        </div>
         <div class="nav-group">
           <button class="nav nav-parent" data-tab="pr"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h13l-1.4 7.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6L5.8 4H3"/><path d="M9 20h.1"/><path d="M17 20h.1"/><path d="M10 11h6"/><path d="M13 8v6"/></svg></span>สร้างใบสั่งซื้อ</button>
           <div class="nav-children" aria-label="เมนูย่อยสร้างใบสั่งซื้อ">
@@ -214,13 +217,29 @@
         </div>
       </section>
 
+      <section id="executive" class="tab">
+        <header class="page-head"><div><p class="eyebrow">รายงาน / สำหรับผู้บริหาร</p><h2>Executive Summary</h2><p class="muted">ภาพรวม เงินจม ความพร้อมให้บริการ และการจัดซื้อ</p></div><button id="printExecutiveBtn" type="button" disabled>พิมพ์สรุป / Save PDF</button></header>
+        <form id="executiveForm" class="panel executive-filters">
+          <label>ช่วงเวลา<select name="period"><option value="month">เดือนนี้</option><option value="week">7 วันล่าสุด</option><option value="day">วันนี้</option><option value="quarter">ไตรมาสนี้</option><option value="year">ปีนี้</option><option value="custom">กำหนดวันที่</option></select></label>
+          <label data-executive-date hidden>เริ่มวันที่<input name="start" type="date"></label><label data-executive-date hidden>ถึงวันที่<input name="end" type="date"></label>
+          <label>เครื่อง<select name="machine"><option value="">ทุกเครื่อง</option></select></label><label>Supplier<select name="supplier"><option value="">ทุก Supplier</option></select></label><button class="primary" type="submit">แสดงรายงาน</button>
+        </form>
+        <p id="executiveStatus" role="status" aria-live="polite"></p>
+        <div id="executiveReport" hidden>
+          <p id="executiveRange" class="muted"></p>
+          <div class="subnav executive-subnav" role="group" aria-label="ส่วนของรายงานผู้บริหาร"><button type="button" class="subnav-btn active" data-executive-view="overview">ภาพรวม</button><button type="button" class="subnav-btn" data-executive-view="capital">เงินจม / ต้นทุน</button><button type="button" class="subnav-btn" data-executive-view="readiness">ความพร้อมให้บริการ</button><button type="button" class="subnav-btn" data-executive-view="procurement">จัดซื้อ / Supplier</button><button type="button" class="subnav-btn" data-executive-view="brief">สรุปเปิดประชุม</button></div>
+          <div id="executiveOverview" data-executive-panel="overview"></div><div id="executiveCapital" data-executive-panel="capital" hidden></div><div id="executiveReadiness" data-executive-panel="readiness" hidden></div><div id="executiveProcurement" data-executive-panel="procurement" hidden></div><div id="executiveBrief" data-executive-panel="brief" hidden></div>
+          <aside class="panel executive-notes"><strong>ขอบเขตข้อมูล</strong><p>มูลค่าประมาณจากต้นทุนที่ตั้งไว้ปัจจุบัน ไม่ใช่ราคาซื้อจริงราย Lot หรือยอดจ่ายจริง • PR คือยอดขอซื้อ ไม่ใช่ยอดจ่ายจริง • สต๊อก ความเสี่ยงหมดอายุ และ PR ค้าง เป็นสถานะปัจจุบัน ส่วนการรับเข้า ใช้งาน และตัดทิ้งอ้างอิงงวดที่เลือก</p><p>อัตราใช้เฉลี่ยเป็นค่าประมาณจากงวด ไม่ใช่การพยากรณ์ • ยังไม่มีทะเบียนสินค้าจำเป็นต่อการให้บริการ จึงยังไม่สรุปว่าเครื่องจะหยุดบริการ • OTIF คำนวณทั้งส่วนของ Supplier ในใบ PR ที่เกี่ยวข้อง เครื่องเป็นตัวเลือกใบเอกสาร • วันที่เคลื่อนไหวใช้วันที่ที่บันทึกในระบบ</p></aside>
+        </div>
+      </section>
+
       <section id="reports" class="tab">
         <header class="page-head">
           <div>
             <h2>รายงาน (Report)</h2>
             <p class="muted">พิมพ์รายงานการรับสินค้าและรายงานการตัด Stock ตามช่วงวันที่</p>
           </div>
-          <button id="printReportBtn" type="button">พิมพ์รายงาน</button>
+          <button id="openExecutiveReport" class="admin-only" type="button">Executive Summary</button><button id="printReportBtn" type="button">พิมพ์รายงาน</button>
         </header>
         <div class="subnav panel">
           <button class="subnav-btn active" type="button" data-report-type="receive">รายงานรับสินค้า</button>
@@ -404,6 +423,7 @@
     </section>
   </main>
 
+  <dialog id="executiveDetailsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="executiveDetailsTitle"></h3><div class="table-wrap"><table id="executiveDetailsTable"></table></div></dialog>
   <dialog id="expiredDisposalDialog" class="form-dialog"><form id="expiredDisposalForm" class="panel stack"><h3>ตัดสินค้าหมดอายุทิ้ง</h3><p id="expiredDisposalItem"></p><label>Lot / วันหมดอายุ<select name="lot_index" required></select></label><p id="expiredDisposalBalance" class="muted"></p><label><span>จำนวนตัดทิ้ง (<span id="expiredDisposalUnit"></span>)</span><input name="quantity" type="number" min="1" max="2000" step="1" required></label><label>เหตุผล<input name="reason" value="สินค้าหมดอายุ" minlength="3" maxlength="450" required></label><p class="muted">ระบบตัดเฉพาะ Lot ที่เลือก ไม่ตัด Lot อื่น บันทึกเป็นรายการตัดทิ้งแยกจากการนำไปใช้งาน</p><button class="danger" id="saveExpiredDisposalBtn">บันทึกตัดทิ้ง</button><button type="button" id="cancelExpiredDisposalBtn">ยกเลิก</button></form></dialog>
   <dialog id="itemLotsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3 id="itemLotsTitle">จัดการ Lot สินค้า</h3><p class="muted">แยกตามเลข Lot และวันหมดอายุ • จำนวนเป็นหน่วยที่ใช้ตัดจริง • แก้ไขข้อมูลได้เฉพาะผู้ดูแล และ Lot ที่ยังอยู่ในคลังครบทุกหน่วย</p><div class="table-wrap"><table id="itemLotsTable"></table></div></dialog>
   <dialog id="lotUnitsDialog" class="analytics-dialog"><form method="dialog"><button class="analytics-close">ปิด</button></form><h3>QR ใน Lot</h3><div class="table-wrap"><table id="lotUnitsTable"></table></div><button id="moreLotUnitsBtn" hidden>โหลด QR ถัดไป</button></dialog>

@@ -913,3 +913,24 @@ th[data-key="select"] { width:44px; min-width:44px; }
 .settings-panels > .panel { margin:0; padding:24px; border:0; border-radius:0; box-shadow:none; min-width:0; }
 .settings-panels .table-wrap.small { max-height:60vh; }
 @media (max-width:640px) { .settings-tab-button { padding:10px 12px; } .settings-panels > .panel { padding:16px; } }
+
+.executive-filters { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+.executive-filters label { flex:1 1 160px; }
+.executive-subnav { display:flex; gap:6px; overflow-x:auto; margin:16px 0; padding-bottom:6px; }
+.executive-subnav button { flex:0 0 auto; white-space:nowrap; }
+.executive-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.executive-kpi { display:flex; flex-direction:column; text-align:left; align-items:flex-start; gap:7px; white-space:normal; padding:18px; background:#fff; border:1px solid var(--line); border-top:3px solid #1f6feb; border-radius:10px; min-width:0; }
+.executive-kpi span { color:var(--muted); font-size:13px; }
+.executive-kpi strong { font-size:25px; color:var(--text); overflow-wrap:anywhere; }
+.executive-kpi small { font-size:12px; color:var(--muted); }
+.executive-kpi.red { border-top-color:#dc2626; }.executive-kpi.amber { border-top-color:#f59e0b; }
+.executive-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.executive-grid .panel { min-width:0; }
+.executive-bar { display:grid; grid-template-columns:minmax(80px,1fr) minmax(50px,2fr) auto; align-items:center; gap:8px; width:100%; border:0; border-bottom:1px solid var(--line); border-radius:0; padding:10px 0; text-align:left; background:transparent; font-size:12px; }
+.executive-bar span { overflow-wrap:anywhere; }.executive-bar i { height:12px; background:#edf2f8; border-radius:4px; }.executive-bar b { display:block; height:100%; background:#1f6feb; border-radius:4px; }.executive-bar strong { font-size:12px; }
+.executive-decisions button { text-align:left; border:0; background:transparent; color:#1757bd; padding:5px 0; white-space:normal; }
+.executive-notes { color:var(--muted); font-size:12px; margin-top:16px; }
+@media(max-width:800px){.executive-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.executive-grid{grid-template-columns:1fr}.executive-kpi strong{font-size:21px}}
+@media(max-width:440px){.executive-kpis{grid-template-columns:1fr}.executive-bar{grid-template-columns:minmax(80px,1fr) minmax(30px,1fr) auto}}
+.executive-subnav .subnav-btn[aria-pressed="false"] { background:#fff; color:var(--text); }
+@media(min-width:1100px) { #executiveCapital .executive-kpis,#executiveReadiness .executive-kpis,#executiveProcurement .executive-kpis { grid-template-columns:repeat(4,minmax(0,1fr)); } }

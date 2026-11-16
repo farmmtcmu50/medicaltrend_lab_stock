@@ -37,9 +37,13 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const workflowUi = {busy:false,consumeBusy:false,operations:[],cursor:null,counts:[],prLines:[],recent:[]};
+let bindExecutiveUi,refreshExecutive;
 boot();
 
 async function boot() {
+  const {createExecutiveReport}=await import('/executive.js');
+  const executive=createExecutiveReport({state,$,$$,api,formData,todayText,renderTable,money,esc,toast,switchTab});
+  bindExecutiveUi=executive.bindExecutiveUi;refreshExecutive=executive.refreshExecutive;
   bindUi();
   try {
     const me = await api("/api/me");
@@ -54,6 +58,7 @@ async function boot() {
 }
 
 function bindUi() {
+  bindExecutiveUi();
   $$('[data-settings-tab]').forEach(button=>{
     button.addEventListener('click',()=>selectSettingsTab(button.dataset.settingsTab));
     button.addEventListener('keydown',event=>{
@@ -227,12 +232,14 @@ function selectSettingsTab(key){
 }
 
 function switchTab(tab) {
+  if(tab==='executive'&&state.user?.role!=='admin')tab='reports';
   $$(".nav").forEach((b) => {
     const isPrParent = b.classList.contains("nav-parent") && tab === "pr-list";
-    b.classList.toggle("active", b.dataset.tab === tab || isPrParent);
+    b.classList.toggle("active", b.dataset.tab === tab || isPrParent || (b.dataset.tab==='reports'&&tab==='executive'));
   });
   $$(".tab").forEach((el) => el.classList.toggle("active", el.id === tab));
   location.hash = tab;
+  if (tab === "executive") refreshExecutive();
   if (tab === "items") { resizeItemsTable(); refreshItems().catch(error=>toast(error.message,true)); }
   if (tab === "machines") refreshMachineRegistry().catch(error=>toast(error.message,true));
   if (tab === "suppliers") refreshSuppliers().catch(error=>toast(error.message,true));
