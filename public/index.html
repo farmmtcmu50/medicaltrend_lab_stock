@@ -71,7 +71,6 @@
           <h1><span class="lab-name">Medical Trend</span> Lab Operations</h1>
           </div>
         </div>
-        <label>ขนาดสติกเกอร์ (ใช้กับทุกจุดพิมพ์)<select id="labelSize"><option value="50x25">5 × 2.5 ซม. (เดิม)</option><option value="50x20">5 × 2 ซม.</option><option value="50x30">5 × 3 ซม.</option></select></label>
         <div class="workbar-card">
           <span>Workspace</span>
           <strong>stock.medicaltrend.stream</strong>
@@ -320,7 +319,7 @@
       <section id="settings" class="tab">
         <header class="page-head"><div><h2>ตั้งค่า</h2><p class="muted">Backup, Restore, Users, Audit และข้อมูลระบบ</p></div></header>
         <div class="settings-tabs" role="tablist" aria-label="หัวข้อการตั้งค่า">
-          <button type="button" id="settings-tab-branding" class="settings-tab-button " data-settings-tab="branding" role="tab" aria-controls="settings-panel-branding" aria-selected="true" tabindex="0">โลโก้ / ชื่อองค์กร</button>
+          <button type="button" id="settings-tab-branding" class="settings-tab-button " data-settings-tab="branding" role="tab" aria-controls="settings-panel-branding" aria-selected="true" tabindex="0">โลโก้ / การพิมพ์</button>
           <button type="button" id="settings-tab-database" class="settings-tab-button " data-settings-tab="database" role="tab" aria-controls="settings-panel-database" aria-selected="false" tabindex="-1">ฐานข้อมูล / Export</button>
           <button type="button" id="settings-tab-permissions" class="settings-tab-button admin-only" data-settings-tab="permissions" role="tab" aria-controls="settings-panel-permissions" aria-selected="false" tabindex="-1">สิทธิ์ Dashboard</button>
           <button type="button" id="settings-tab-users" class="settings-tab-button admin-only" data-settings-tab="users" role="tab" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">ผู้ใช้งาน</button>
@@ -331,7 +330,9 @@
         <div class="settings-panels">
           <section class="panel stack admin-only" id="settings-panel-permissions" data-settings-panel="permissions" role="tabpanel" aria-labelledby="settings-tab-permissions" tabindex="0" hidden><h3>สิทธิ์ Dashboard ตาม Role</h3><p>กำหนดข้อมูลที่ staff ทุกบัญชีมองเห็นใน Dashboard โดย admin เห็นครบเสมอ สิทธิ์ในเมนูอื่นยังใช้ตามเดิม</p><form id="dashboardPermissionsForm" class="stack"><strong>Role: staff</strong><label><input type="checkbox" name="stock"> ภาพรวมสต๊อก / Stockout / ROP และรายละเอียดสินค้า</label><label><input type="checkbox" name="near"> สินค้าใกล้หมดอายุ / หมดอายุ (FEFO)</label><label><input type="checkbox" name="delivery"> การส่งมอบ Supplier / OTIF / Lead Time</label><label><input type="checkbox" name="finance"> มูลค่าสต๊อก ต้นทุน อัตราหมุนเวียน DOH และมูลค่าตัดทิ้ง</label><p class="muted">การเปิดมูลค่า/ต้นทุนจะอนุญาตให้ staff เห็นข้อมูลราคาที่เกี่ยวข้องใน Dashboard</p><button class="primary">บันทึกสิทธิ์ Dashboard</button><p id="dashboardPermissionsStatus" role="status"></p></form></section>
           <section class="panel stack" id="settings-panel-branding" data-settings-panel="branding" role="tabpanel" aria-labelledby="settings-tab-branding" tabindex="0">
-            <h3>Branding / การพิมพ์</h3>
+            <h3>โลโก้ / การพิมพ์</h3>
+            <label>ขนาดสติกเกอร์ (ใช้กับทุกจุดพิมพ์)<select id="labelSize"><option value="50x25">5 × 2.5 ซม. (เดิม)</option><option value="50x20">5 × 2 ซม.</option><option value="50x30">5 × 3 ซม.</option></select></label>
+            <p class="muted">จำขนาดที่เลือกอัตโนมัติในเบราว์เซอร์นี้ และใช้กับทุกจุดพิมพ์สติกเกอร์</p>
             <form id="brandingForm" class="grid-form">
               <label>ชื่อแล็บ<input name="lab_name" maxlength="120" required></label>
               <label>โลโก้องค์กร<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"></label>
