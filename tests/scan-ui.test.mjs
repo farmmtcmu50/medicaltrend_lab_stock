@@ -259,3 +259,11 @@ test('settings tabs show one panel and respect admin and Access restrictions',as
  vm.runInContext(`state.auth='password';selectSettingsTab('password');`,context);
  assert.equal(panels[3].hidden,false);assert.equal(buttons.filter(button=>button.tabIndex===0).length,1);
 });
+
+test('manual PR addition loads current stock before adding a draft row and stops on lookup failure',async()=>{
+ const {context}=await workflowContext();context.paths=[];
+ vm.runInContext(`state.items=[{item_id:'A',reagent_name:'Item A',main_unit:'BOX',stock_quantity:999}];manualPrRowData=()=>({order_qty:2,unit:'BOX'});confirmBox=async()=>true;renderPurchaseRequisition=()=>{};$('#manualPrDialog').close=()=>{};api=async path=>{paths.push(path);return {current_stock:'1 BOX + 2 TEST'};};`,context);
+ await vm.runInContext("addManualPrItem('A')",context);
+ assert.deepEqual(context.paths,['/api/items/A/stock']);assert.equal(vm.runInContext('state.prRows[0].current_stock',context),'1 BOX + 2 TEST');
+ vm.runInContext("api=async()=>{throw new Error('offline');}",context);await vm.runInContext("addManualPrItem('A')",context);assert.equal(vm.runInContext('state.prRows.length',context),1);assert.equal(vm.runInContext('state.manualPrAdding',context),false);
+});

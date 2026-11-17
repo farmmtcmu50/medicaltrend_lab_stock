@@ -113,6 +113,12 @@ async function api(request, env) {
   if(method==='GET'&&path==='/items/template')return itemTemplate(env,user);
   if(method==='POST'&&path==='/items/import/preview')return json(await previewItemImport(request,env,user));
   if(method==='POST'&&path==='/items/import/commit')return json(await commitItemImport(request,env,user));
+  if(method==='GET'&&/^\/items\/[^/]+\/stock$/.test(path)){
+    const itemId=decodeURIComponent(path.split('/')[2]);
+    const balance=await env.DB.prepare(STOCK_BALANCE_SQL).bind(itemId).first();
+    if(!balance)throw httpError('ไม่พบรายการสินค้า',404);
+    return json({ok:true,item_id:itemId,current_stock:balance.current_stock},200,{'cache-control':'no-store'});
+  }
   if (method === "GET" && path === "/items") return listItems(request, env, user);
   if (method === "POST" && path === "/items") return addItem(request, env, user);
   if (method === "PUT" && path.startsWith("/items/") && path.endsWith("/active")) return setItemActive(request, env, user, path.split("/")[2]);
@@ -473,6 +479,8 @@ async function listPurchaseRequisitions(env, user) {
   return json({ ok: true, rows, can_view_prices: canViewPrices(user), can_approve_pr: canViewPrices(user) });
 }
 
+const STOCK_BALANCE_SQL=`SELECT CASE WHEN has_sub_unit=0 THEN qty||' '||main_unit ELSE CAST(qty/factor AS INTEGER)||' '||main_unit||CASE WHEN qty%factor>0 THEN ' + '||(qty%factor)||' '||sub_unit ELSE '' END END AS current_stock FROM (SELECT main_unit,sub_unit,has_sub_unit,MAX(1,sub_per_main) factor,(SELECT COUNT(*) FROM stock_units s WHERE s.item_id=i.item_id AND s.status='IN_STOCK') qty FROM items i WHERE item_id=? AND is_deleted=0)`;
+
 function purchaseRequisitionBatch(body,env,user) {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw httpError("กรุณาเพิ่มรายการในใบ PR ก่อนส่งอนุมัติ");
@@ -494,13 +502,14 @@ function purchaseRequisitionBatch(body,env,user) {
   items.forEach((item) => {
     const itemName = String(item.name || item.item_name || "").trim();
     if (!itemName) return;
+    const manualStock=item.source==='manual'&&String(item.item_id||'').trim();
     batch.push(env.DB.prepare(
       `INSERT INTO purchase_requisition_items
        (line_id, pr_id, item_id, item_name, supplier, current_stock, lot, expiry, order_qty, unit, unit_price, reason, source, supplier_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT supplier_id FROM suppliers WHERE name=? COLLATE NOCASE),(SELECT supplier_id FROM items WHERE item_id=? AND ?='')))`
+       VALUES (?, ?, ?, ?, ?, ${manualStock?`COALESCE((${STOCK_BALANCE_SQL}),?)`:"?"}, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT supplier_id FROM suppliers WHERE name=? COLLATE NOCASE),(SELECT supplier_id FROM items WHERE item_id=? AND ?='')))`
     ).bind(
       nextId("PRI"), prId, String(item.item_id || ""), itemName, String(item.supplier || ""),
-      String(item.current_stock || ""), String(item.lot || ""), String(item.expiry || ""),
+      ...(manualStock?[String(item.item_id),String(item.current_stock||'')]:[String(item.current_stock||'')]), String(item.lot || ""), String(item.expiry || ""),
       Math.max(0, Number(item.order_qty || 0)), String(item.unit || ""),
       canViewPrices(user) ? Number(item.unit_price || 0) : 0,
       String(item.reason || ""), String(item.source || ""), String(item.supplier||'').trim(), String(item.item_id||''), String(item.supplier||'').trim()

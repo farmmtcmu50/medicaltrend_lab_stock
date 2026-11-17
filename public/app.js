@@ -850,32 +850,37 @@ function renderManualPrItems() {
     reason: (v, item) => `<input class="table-input wide" data-manual-pr="${esc(item.item_id)}" data-field="reason" value="${esc(v)}">`,
     actions: (_, item) => `<button data-add-manual-pr="${esc(item.item_id)}" type="button">เลือก</button>`,
   });
-  $$("[data-add-manual-pr]").forEach((btn) => btn.addEventListener("click", () => addManualPrItem(btn.dataset.addManualPr)));
+  $$("[data-add-manual-pr]").forEach((btn) => btn.addEventListener("click", () => addManualPrItem(btn.dataset.addManualPr,btn)));
 }
 
-async function addManualPrItem(itemId) {
+async function addManualPrItem(itemId,button) {
+  if(state.manualPrAdding)return;
   const item = state.items.find((row) => row.item_id === itemId);
   if (!item) return toast("กรุณาเลือกรายการสินค้าจากฐานข้อมูล", true);
   const data = manualPrRowData(itemId, item);
-  const ok = await confirmBox("ยืนยันเพิ่มรายการเข้าใบ PR", `เพิ่ม ${esc(item.reagent_name)} จำนวน ${esc(data.order_qty)} ${esc(data.unit)} เข้าใบ PR ใช่ไหม?`);
-  if (!ok) return;
-  state.prRows.push({
-    id: nextClientId("PRM"),
-    item_id: item.item_id,
-    name: item.reagent_name,
-    supplier: item.supplier || "",
-    order_qty: Math.max(1, Number(data.order_qty || 1)),
-    unit: data.unit || item.main_unit || item.sub_unit || "",
-    unit_price: Number(data.unit_price || item.main_unit_price || item.unit_price || 0),
-    current_stock: "",
-    lot: "",
-    expiry: "",
-    reason: data.reason || "ต้องการสั่งซื้อเพิ่มเติม",
-    source: "manual",
-  });
-  renderPurchaseRequisition();
-  $("#manualPrDialog").close();
-  toast("เพิ่มรายการเข้าใบ PR แล้ว");
+  state.manualPrAdding=true;if(button)button.disabled=true;
+  try{
+    const balance=await api(`/api/items/${encodeURIComponent(itemId)}/stock`);
+    const ok = await confirmBox("ยืนยันเพิ่มรายการเข้าใบ PR", `เพิ่ม ${esc(item.reagent_name)} จำนวน ${esc(data.order_qty)} ${esc(data.unit)} เข้าใบ PR ใช่ไหม?`);
+    if (!ok) return;
+    state.prRows.push({
+      id: nextClientId("PRM"),
+      item_id: item.item_id,
+      name: item.reagent_name,
+      supplier: item.supplier || "",
+      order_qty: Math.max(1, Number(data.order_qty || 1)),
+      unit: data.unit || item.main_unit || item.sub_unit || "",
+      unit_price: Number(data.unit_price || item.main_unit_price || item.unit_price || 0),
+      current_stock: balance.current_stock,
+      lot: "",
+      expiry: "",
+      reason: data.reason || "ต้องการสั่งซื้อเพิ่มเติม",
+      source: "manual",
+    });
+    renderPurchaseRequisition();
+    $("#manualPrDialog").close();
+    toast("เพิ่มรายการเข้าใบ PR แล้ว");
+  }catch(error){toast(error.message,true);}finally{state.manualPrAdding=false;if(button)button.disabled=false;}
 }
 
 function manualPrRowData(itemId, item) {

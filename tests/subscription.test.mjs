@@ -567,3 +567,21 @@ test('executive report is admin-only, tenant isolated and independent from Dashb
  const bCookie=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;
  const b=await tenantRequest('tenant-b','/api/reports/executive?period=month',{cookie:bCookie});assert.equal(b.status,200);assert.ok(!b.data.details.some(row=>row.name==='A reagent'));
 });
+
+test('manually added PR lines snapshot fresh stock in main and sub units without trusting the browser value',async()=>{
+ const cookie=await wfAuth(),vendor=(await aDb.prepare('SELECT supplier_id,name FROM suppliers WHERE is_active=1 AND is_placeholder=0 LIMIT 1').first());
+ const item=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{reagent_name:'Manual PR balance',machine:'Manual',supplier_id:vendor.supplier_id,main_unit:'BOX',sub_unit:'TEST',has_sub_unit:1,sub_per_main:5}})).data.item_id;
+ const received=await wfPost('/api/receive',{item_id:item,quantity:7,unit_mode:'sub',sticker_mode:'sub',lot:'PR-BALANCE',expiry_date:'2030-12-31'},cookie);assert.equal(received.status,200);
+ const staff=(await tenantRequest('tenant-a','/api/login',{method:'POST',body:{username:'wf-staff',password}})).cookie;
+ const balance=await tenantRequest('tenant-a',`/api/items/${item}/stock`,{cookie:staff});assert.equal(balance.status,200);assert.equal(balance.data.current_stock,'1 BOX + 2 TEST');assert.ok(!('unit_price' in balance.data));
+ assert.equal((await wfPost('/api/consume',{barcode:received.data.labels[0].code},cookie)).status,200);
+ const pr=await tenantRequest('tenant-a','/api/purchase-requisitions',{method:'POST',cookie,body:{items:[{item_id:item,name:'Manual PR balance',supplier:vendor.name,source:'manual',current_stock:'stale browser value',order_qty:1,unit:'BOX'}]}});assert.equal(pr.status,200,JSON.stringify(pr.data));
+ const line=await aDb.prepare('SELECT current_stock FROM purchase_requisition_items WHERE pr_id=?').bind(pr.data.pr_id).first();assert.equal(line.current_stock,'1 BOX + 1 TEST');
+ assert.equal((await wfPost('/api/consume',{barcode:received.data.labels[1].code},cookie)).status,200);
+ assert.equal((await aDb.prepare('SELECT current_stock FROM purchase_requisition_items WHERE pr_id=?').bind(pr.data.pr_id).first()).current_stock,'1 BOX + 1 TEST');
+ const other=(await tenantRequest('tenant-b','/api/login',{method:'POST',body:{username:'admin',password}})).cookie;assert.equal((await tenantRequest('tenant-b',`/api/items/${item}/stock`,{cookie:other})).status,404);
+ const single=(await tenantRequest('tenant-a','/api/items',{method:'POST',cookie,body:{reagent_name:'Single PR balance',machine:'Manual',supplier_id:vendor.supplier_id,main_unit:'TANK',has_sub_unit:0}})).data.item_id;
+ assert.equal((await tenantRequest('tenant-a',`/api/items/${single}/stock`,{cookie})).data.current_stock,'0 TANK');
+ await wfPost('/api/receive',{item_id:single,quantity:2,lot:'SINGLE',expiry_date:'2030-12-31'},cookie);
+ assert.equal((await tenantRequest('tenant-a',`/api/items/${single}/stock`,{cookie})).data.current_stock,'2 TANK');
+});
