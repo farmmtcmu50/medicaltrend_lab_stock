@@ -42,7 +42,7 @@ boot();
 
 async function boot() {
   const {createExecutiveReport}=await import('/executive.js');
-  const executive=createExecutiveReport({state,$,$$,api,formData,todayText,renderTable,money,esc,toast,switchTab});
+  const executive=createExecutiveReport({state,$,$$,api,formData,todayText,renderTable,money,esc,toast,switchTab,renderInventoryVisual});
   bindExecutiveUi=executive.bindExecutiveUi;refreshExecutive=executive.refreshExecutive;
   bindUi();
   try {
@@ -351,7 +351,6 @@ async function refreshDashboard() {
       .reduce((sum, row) => sum + Number(row.stock_value || 0), 0));
   }
   $$('#dashboard .dashboard-filter-card').forEach(el=>el.classList.toggle('hidden',!res.permissions?.stock||(el.classList.contains('price-only')&&!res.can_view_prices)));
-  $('#inventoryVisualBoard').hidden=!res.can_view_prices;
   renderDashboardCardFilterState();
   renderDashboardColumns();
   renderDashboardTable();
@@ -1949,8 +1948,8 @@ function stockValueChanges(list,filters={}){
  rows.sort(filters.sort==='name'?byName:filters.sort==='asc'?(a,b)=>a.change-b.change||byName(a,b):(a,b)=>b.change-a.change||byName(a,b));
  return {rows,max:Math.max(1,...rows.map(row=>Math.abs(row.change)))};
 }
-function renderInventoryVisual(a,rows){
- const host=$('#inventoryVisualBoard');if(!host)return;
+function renderInventoryVisual(a,rows,onDetails){
+ const host=$('#executiveInventoryVisualBoard');if(!host)return;
  const list=a.inventory||[],sum=key=>list.reduce((total,row)=>total+Number(row[key]||0),0);
  const opening=sum('opening_value'),closing=sum('closing_value'),average=sum('average_value'),used=sum('used_value');
  const metric=(title,value,note,icon)=>`<article class="visual-kpi"><span>${title}<b aria-hidden="true">${icon}</b></span><strong>${value}</strong><small>${note}</small></article>`;
@@ -1958,7 +1957,7 @@ function renderInventoryVisual(a,rows){
  const groups=new Map();for(const r of list)groups.set(r.machine,(groups.get(r.machine)||0)+Math.max(0,Number(r.closing_value)||0));
  const distribution=[...groups].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),total=distribution.reduce((s,[,v])=>s+v,0);
  let offset=0;const stops=distribution.map(([,v],i)=>{const start=offset;offset+=v/total*100;return `${colors[i%colors.length]} ${start}% ${offset}%`;});
- const chartFilters=state.valueChartFilters||{sort:'desc',machine:'',supplier:''};
+ const chartFilters=state.executiveValueChartFilters||{sort:'desc',machine:'',supplier:''};
  const dashboardById=new Map(rows.map(row=>[row.item_id,row]));
  const chartList=list.map(row=>({...row,supplier:row.supplier||dashboardById.get(row.item_id)?.supplier||'ยังไม่ระบุ Supplier'}));
  const {rows:comparisons,max}=stockValueChanges(chartList.filter(row=>row.has_movement),chartFilters);
@@ -1970,15 +1969,14 @@ function renderInventoryVisual(a,rows){
  const empty='<p class="visual-empty">ยังไม่มีมูลค่าสำหรับช่วงเวลานี้</p>';
  const itemButton=r=>`<button class="visual-name" data-visual-item="${esc(r.item_id)}" title="ดูรายละเอียด ${esc(r.name)}">${esc(r.name)}</button>`;
  host.innerHTML=`<div class="visual-kpis">${a.inventory?metric('Total Inventory Value',money(closing),'มูลค่าปลายงวด · บาท','◈'):''}${metric('Active Items',a.inventory?list.length:rows.length,'รายการที่เปิดใช้งานตามตัวกรอง','▤')}${a.inventory?metric('Inventory Turnover',average>0?(used/average).toFixed(2)+'×':'—','ใช้งานสุทธิ ÷ มูลค่าคงเหลือเฉลี่ย','↻')+metric('Total Usage (Net)',money(used),'มูลค่าใช้งานสุทธิในช่วง · บาท','↗'):''}</div>${a.inventory?`<div class="visual-charts"><article class="visual-panel visual-comparison"><h3>STOCK VALUE CHANGE</h3><p>มูลค่าปลายงวด − ต้นงวด · บาท · เฉพาะรายการที่มีผลต่างมูลค่าในงวด ไม่รวมผลต่างศูนย์</p>${chartControls}<div class="visual-change-summary">ผลต่างรวมตามตัวกรอง <strong>${signed(Math.round(changeTotal*100)/100)}</strong> บาท · ${comparisons.length} รายการ</div><div class="visual-change-axis"><span>−${money(max)}</span><span>0</span><span>+${money(max)}</span></div><div class="visual-scroll">${comparisons.length?comparisons.map(r=>`<div class="visual-change-row">${itemButton(r)}<div class="visual-change-track" role="img" aria-label="${esc(r.name)} ผลต่าง ${signed(r.change)} บาท"><i title="${esc(r.name)} · ต้นงวด ${money(r.opening_value)} บาท · ปลายงวด ${money(r.closing_value)} บาท · ผลต่าง ${signed(r.change)} บาท" class="${r.change<0?'negative':'positive'}" style="left:${r.change<0?50-Math.abs(r.change)/max*50:50}%;width:${Math.abs(r.change)/max*50}%"></i></div><b class="visual-change-value ${r.change<0?'negative':r.change>0?'positive':''}">${signed(r.change)}</b></div>`).join(''):'<p class="visual-empty">ไม่มีรายการที่ตรงกับตัวกรอง</p>'}</div><div class="visual-change-legend"><span>← ลดลง (ลบ)</span><span>เพิ่มขึ้น (บวก) →</span></div></article><article class="visual-panel"><h3>STOCK DISTRIBUTION BY ANALYZER</h3><p>สัดส่วนมูลค่าปลายงวดตามเครื่อง / ยี่ห้อ</p><div class="visual-distribution"><div class="visual-donut" role="img" aria-label="สัดส่วนมูลค่าปลายงวดตามเครื่อง ดูตัวเลขในรายการข้างเคียง" style="background:${total?'conic-gradient('+stops.join(',')+')':'#e7edf5'}"><span>${distribution.length}<small>เครื่อง / ยี่ห้อ</small></span></div><div class="visual-legend">${distribution.map(([name,v],i)=>`<button data-visual-machine="${esc(name)}"><i style="background:${colors[i%colors.length]}"></i><span>${esc(name)}</span><b>${(v/total*100).toFixed(1)}%</b></button>`).join('')||empty}</div></div></article><article class="visual-panel"><h3>ITEM TURNOVER RATE</h3><p>อัตราหมุนเวียนรายสินค้า · เท่าในช่วงที่เลือก</p><div class="visual-scroll visual-turnovers">${turnovers.length?turnovers.map(r=>`<div class="visual-pair">${itemButton(r)}<div class="visual-barline"><i class="turnover_value" style="width:${Math.max(0,r.turnover)/maxTurn*100}%"></i><b>${r.turnover.toFixed(2)}×</b></div></div>`).join(''):'<p class="visual-empty">คำนวณไม่ได้เมื่อมูลค่าคงเหลือเฉลี่ยเป็นศูนย์</p>'}</div></article></div>`:''}`;
- host.querySelectorAll('[data-change-filter]').forEach(select=>select.addEventListener('change',()=>{state.valueChartFilters={...chartFilters,[select.dataset.changeFilter]:select.value};renderInventoryVisual(a,rows);host.querySelector(`[data-change-filter="${select.dataset.changeFilter}"]`)?.focus();}));
- host.querySelectorAll('[data-visual-item]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{item:button.dataset.visualItem})));
- host.querySelectorAll('[data-visual-machine]').forEach(button=>button.addEventListener('click',()=>openAnalyticsDetails('turnover',{machine:button.dataset.visualMachine})));
+ host.querySelectorAll('[data-change-filter]').forEach(select=>select.addEventListener('change',()=>{state.executiveValueChartFilters={...chartFilters,[select.dataset.changeFilter]:select.value};renderInventoryVisual(a,rows,onDetails);host.querySelector(`[data-change-filter="${select.dataset.changeFilter}"]`)?.focus();}));
+ host.querySelectorAll('[data-visual-item]').forEach(button=>button.addEventListener('click',()=>onDetails({item:button.dataset.visualItem})));
+ host.querySelectorAll('[data-visual-machine]').forEach(button=>button.addEventListener('click',()=>onDetails({machine:button.dataset.visualMachine})));
 }
 
 function renderAnalytics(){
  const a=state.analytics,rows=state.dashboard||[];
  if(!a)return;
- if(state.dashboardPermissions?.finance===false)$('#inventoryVisualBoard').innerHTML='';else renderInventoryVisual(a,rows);
  const all=rows.length,empty=rows.filter(r=>Number(r.qty_sub)<=0).length,rop=rows.filter(r=>Number(r.qty_sub)<=Number(r.reorder_point_sub)).length;
  const pct=(n,d)=>d>0?(n/d*100).toFixed(1)+'%':'ไม่มีข้อมูล';
  const pie=(n,d,color)=>`<div class="pie-layout"><div class="analytics-pie" style="background:conic-gradient(${color} 0 ${d?n/d*100:0}%,#e7edf5 0 100%)"><span>${pct(n,d)}</span></div><div><strong>${n} / ${d} รายการ</strong><p>นับเฉพาะรายการที่เปิดใช้งาน</p></div></div>`;

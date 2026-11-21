@@ -83,7 +83,7 @@
       <section id="dashboard" class="tab active">
         <header class="page-head">
           <div>
-            <h2>⚗ LAB INVENTORY &amp; TURNOVER ANALYTICS</h2>
+            <h2>Dashboard</h2>
             <p class="muted">ภาพรวมคลังสินค้าตามสถานะล่าสุด</p>
           </div>
           <div class="toolbar">
@@ -98,7 +98,6 @@
             <a class="button" href="/api/export/excel">Export Excel</a>
           </div>
         </header>
-        <div id="inventoryVisualBoard" aria-label="ภาพรวมมูลค่าและการหมุนเวียนคลัง"></div>
         <div class="summary-grid">
           <article class="summary-card amber dashboard-filter-card" role="button" tabindex="0" data-dashboard-filter="expiring"><span>รายการใกล้หมดอายุ</span><strong id="sumExpiringItems">0</strong></article>
           <article class="summary-card red dashboard-filter-card" role="button" tabindex="0" data-dashboard-filter="expired"><span>รายการหมดอายุแล้ว</span><strong id="sumExpiredItems">0</strong></article>
@@ -227,8 +226,8 @@
         <p id="executiveStatus" role="status" aria-live="polite"></p>
         <div id="executiveReport" hidden>
           <p id="executiveRange" class="muted"></p>
-          <div class="subnav executive-subnav" role="group" aria-label="ส่วนของรายงานผู้บริหาร"><button type="button" class="subnav-btn active" data-executive-view="overview">ภาพรวม</button><button type="button" class="subnav-btn" data-executive-view="capital">เงินจม / ต้นทุน</button><button type="button" class="subnav-btn" data-executive-view="readiness">ความพร้อมให้บริการ</button><button type="button" class="subnav-btn" data-executive-view="procurement">จัดซื้อ / Supplier</button><button type="button" class="subnav-btn" data-executive-view="brief">สรุปเปิดประชุม</button></div>
-          <div id="executiveOverview" data-executive-panel="overview"></div><div id="executiveCapital" data-executive-panel="capital" hidden></div><div id="executiveReadiness" data-executive-panel="readiness" hidden></div><div id="executiveProcurement" data-executive-panel="procurement" hidden></div><div id="executiveBrief" data-executive-panel="brief" hidden></div>
+          <div class="subnav executive-subnav" role="group" aria-label="ส่วนของรายงานผู้บริหาร"><button type="button" class="subnav-btn active" data-executive-view="overview">ภาพรวม</button><button type="button" class="subnav-btn" data-executive-view="analytics">Inventory &amp; Turnover</button><button type="button" class="subnav-btn" data-executive-view="capital">เงินจม / ต้นทุน</button><button type="button" class="subnav-btn" data-executive-view="readiness">ความพร้อมให้บริการ</button><button type="button" class="subnav-btn" data-executive-view="procurement">จัดซื้อ / Supplier</button><button type="button" class="subnav-btn" data-executive-view="brief">สรุปเปิดประชุม</button></div>
+          <div id="executiveOverview" data-executive-panel="overview"></div><section data-executive-panel="analytics" hidden><h3>LAB INVENTORY &amp; TURNOVER ANALYTICS</h3><p class="muted">มูลค่าและการหมุนเวียนตามงวด เครื่อง และ Supplier ที่เลือกในรายงาน</p><div id="executiveInventoryVisualBoard"></div></section><div id="executiveCapital" data-executive-panel="capital" hidden></div><div id="executiveReadiness" data-executive-panel="readiness" hidden></div><div id="executiveProcurement" data-executive-panel="procurement" hidden></div><div id="executiveBrief" data-executive-panel="brief" hidden></div>
           <aside class="panel executive-notes"><strong>ขอบเขตข้อมูล</strong><p>มูลค่าประมาณจากต้นทุนที่ตั้งไว้ปัจจุบัน ไม่ใช่ราคาซื้อจริงราย Lot หรือยอดจ่ายจริง • PR คือยอดขอซื้อ ไม่ใช่ยอดจ่ายจริง • สต๊อก ความเสี่ยงหมดอายุ และ PR ค้าง เป็นสถานะปัจจุบัน ส่วนการรับเข้า ใช้งาน และตัดทิ้งอ้างอิงงวดที่เลือก</p><p>อัตราใช้เฉลี่ยเป็นค่าประมาณจากงวด ไม่ใช่การพยากรณ์ • ยังไม่มีทะเบียนสินค้าจำเป็นต่อการให้บริการ จึงยังไม่สรุปว่าเครื่องจะหยุดบริการ • OTIF คำนวณทั้งส่วนของ Supplier ในใบ PR ที่เกี่ยวข้อง เครื่องเป็นตัวเลือกใบเอกสาร • วันที่เคลื่อนไหวใช้วันที่ที่บันทึกในระบบ</p></aside>
         </div>
       </section>

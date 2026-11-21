@@ -1,4 +1,4 @@
-export function createExecutiveReport({state,$,$$,api,formData,todayText,renderTable,money,esc,toast,switchTab}){
+export function createExecutiveReport({state,$,$$,api,formData,todayText,renderTable,money,esc,toast,switchTab,renderInventoryVisual}){
 // Report state is intentionally independent from Dashboard and movement-report filters.
 let executiveData=null,executiveRequest=0;
 function bindExecutiveUi(){
@@ -51,6 +51,13 @@ function exCard(title,value,note,key,tone='blue'){return `<button type="button" 
 function exBars(rows,key,detail){const max=Math.max(...rows.map(row=>Math.abs(Number(row[key]||0))),1);return rows.slice(0,5).map(row=>`<button type="button" class="executive-bar" data-executive-detail="${detail}" title="${esc(row.name)}: ${money(row[key])}"><span>${esc(row.name)}</span><i><b style="width:${Math.abs(Number(row[key]||0))/max*100}%"></b></i><strong>${money(row[key])}</strong></button>`).join('')||'<p class="muted">ยังไม่มีข้อมูล</p>';}
 function exTable(id,title,key){return `<section class="panel"><div class="page-head compact"><h3>${esc(title)}</h3><button type="button" data-executive-detail="${key}">ดูทั้งหมด</button></div><div class="table-wrap"><table id="${id}"></table></div></section>`;}
 function renderExecutive(d){
+ state.executiveValueChartFilters={sort:state.executiveValueChartFilters?.sort||'desc',machine:'',supplier:''};
+ if(renderInventoryVisual)renderInventoryVisual({inventory:d.details},d.details,filter=>{
+   const detail=executiveDetailData('inventory');
+   const rows=detail.rows.filter(row=>(!filter.item||row.item_id===filter.item)&&(!filter.machine||row.machine===filter.machine));
+   $('#executiveDetailsTitle').textContent='มูลค่าและการหมุนเวียน'+(filter.machine?' · '+filter.machine:'');
+   renderTable($('#executiveDetailsTable'),detail.columns,rows,detail.formatters);$('#executiveDetailsDialog').showModal();
+ });
  $('#executiveRange').textContent=`งวด ${d.range.start} — ${d.range.end} • เปรียบเทียบ ${d.previous_range.start} — ${d.previous_range.end} (จำนวนวันเท่ากัน) • ข้อมูลสต๊อกปัจจุบัน ณ ${d.as_of}`;
  const short=d.details.filter(row=>row.below_lead&&!row.stockout).length,actions=executiveActions(d),near30=d.near.filter(row=>row.days>=0&&row.days<30).reduce((n,row)=>n+row.value,0);
  const kpis=exCard('มูลค่าคลังปลายงวด',money(d.metrics.closing_value)+' บาท',executiveChange(d.metrics.closing_value,d.previous.closing_value),'inventory')+exCard('ใช้งานสุทธิในงวด',money(d.metrics.used_value)+' บาท',executiveChange(d.metrics.used_value,d.previous.used_value),'usage')+exCard('Days On Hand',exNumber(d.metrics.doh)+' วัน','ปลายงวด ÷ มูลค่าใช้เฉลี่ยต่อวัน','inventory')+exCard('ขาดสต๊อก / ถึงจุดสั่งซื้อ',`${d.stock.stockout} / ${d.stock.reorder} รายการ`,`จาก ${d.stock.items} รายการ • ขาด ${d.stock.items?(d.stock.stockout/d.stock.items*100).toFixed(1):'—'}% • ROP ${d.stock.items?(d.stock.reorder/d.stock.items*100).toFixed(1):'—'}%`,'reorder','amber')+exCard('ใกล้หมดอายุ <30 วัน',money(near30)+' บาท','สต๊อกปัจจุบัน • ไม่รวมที่หมดอายุแล้ว','near30','amber')+exCard('ตัดทิ้งสุทธิในงวด',money(d.metrics.wasted_value)+' บาท',d.wastage_rate===null?'ยังไม่มีฐานยอดซื้อสำหรับคำนวณอัตรา':`Wastage ${exNumber(d.wastage_rate)}% • ฐานซื้อทั้งคลัง`,'wastage','red');

@@ -28,3 +28,6 @@
 
 ## ตรวจสอบ
 มีการทดสอบสูตร สิทธิ์ admin การแยก tenant ตัวกรองไม่ข้ามเมนู จำนวน PR ไม่ซ้ำ การเปรียบเทียบงวด ข้อมูลว่าง สินค้าราคา 0 และการป้องกัน response เก่าทับผลลัพธ์ล่าสุด
+
+## Inventory & Turnover
+ส่วน LAB INVENTORY & TURNOVER ANALYTICS ย้ายจาก Dashboard มาอยู่แท็บ Inventory & Turnover ใน Executive Summary รวม KPI มูลค่าคลัง/จำนวนสินค้า/อัตราหมุนเวียน/การใช้สุทธิ, Stock Value Change, สัดส่วนมูลค่าตามเครื่อง และ Item Turnover Rate ใช้ข้อมูลงวดและตัวกรองของรายงาน กดสินค้า/เครื่องเพื่อดูรายละเอียดในรายงาน ตัวกรองย่อยของ Stock Value Change แยกจาก Dashboard และรีเซ็ตเครื่อง/Supplier เมื่อแสดงรายงานชุดใหม่

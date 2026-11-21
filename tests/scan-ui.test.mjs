@@ -267,3 +267,11 @@ test('manual PR addition loads current stock before adding a draft row and stops
  assert.deepEqual(context.paths,['/api/items/A/stock']);assert.equal(vm.runInContext('state.prRows[0].current_stock',context),'1 BOX + 2 TEST');
  vm.runInContext("api=async()=>{throw new Error('offline');}",context);await vm.runInContext("addManualPrItem('A')",context);assert.equal(vm.runInContext('state.prRows.length',context),1);assert.equal(vm.runInContext('state.manualPrAdding',context),false);
 });
+
+test('inventory analytics host is under Executive Summary and absent from Dashboard',async()=>{
+ const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
+ const dashboard=html.slice(html.indexOf('<section id="dashboard"'),html.indexOf('<section id="items"'));
+ const executive=html.slice(html.indexOf('<section id="executive"'),html.indexOf('<section id="reports"'));
+ assert.doesNotMatch(dashboard,/inventoryVisualBoard|executiveInventoryVisualBoard|LAB INVENTORY/);
+ assert.match(executive,/executiveInventoryVisualBoard/);assert.match(executive,/LAB INVENTORY &amp; TURNOVER ANALYTICS/);
+});
